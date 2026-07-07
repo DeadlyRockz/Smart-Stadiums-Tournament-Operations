@@ -20,8 +20,9 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -249,6 +250,30 @@ def list_venues() -> VenueList:
                 capacity=v["capacity"],
             )
             for v in data.list_venues()
+        ]
+    )
+
+
+# Declared before /api/venues/{venue_id} so "search" is not read as a venue id.
+@app.get("/api/venues/search", response_model=VenueList)
+def search_venues(
+    q: Annotated[str, Query(min_length=1, max_length=64)],
+) -> VenueList:
+    """Venues whose name, FIFA/commercial name, city, or country matches ``q``.
+
+    Case-insensitive substring match; an empty result is a 200 with an empty
+    list, not an error. The query length is capped by validation (422 beyond).
+    """
+    return VenueList(
+        venues=[
+            VenueSummary(
+                id=v["id"],
+                name=v["name"],
+                city=v["city"],
+                country=v["country"],
+                capacity=v["capacity"],
+            )
+            for v in data.search_venues(q)
         ]
     )
 

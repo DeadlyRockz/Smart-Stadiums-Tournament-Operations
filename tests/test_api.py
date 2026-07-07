@@ -110,6 +110,30 @@ def test_get_unknown_venue_404(client):
     assert resp.status_code == 404
 
 
+# ---- Venue search ------------------------------------------------------------
+
+def test_search_venues_by_city_case_insensitive(client):
+    resp = client.get("/api/venues/search", params={"q": "MEXICO"})
+    assert resp.status_code == 200
+    venues = resp.json()["venues"]
+    assert any(v["id"] == "mexico-city" for v in venues)
+    for v in venues:
+        assert {"id", "name", "city", "country", "capacity"} <= set(v)
+
+
+def test_search_venues_no_match_returns_empty_list(client):
+    resp = client.get("/api/venues/search", params={"q": "atlantis"})
+    assert resp.status_code == 200
+    assert resp.json() == {"venues": []}
+
+
+def test_search_venues_validates_query(client):
+    assert client.get("/api/venues/search").status_code == 422  # q required
+    assert client.get("/api/venues/search", params={"q": ""}).status_code == 422
+    too_long = "x" * 65
+    assert client.get("/api/venues/search", params={"q": too_long}).status_code == 422
+
+
 # ---- Health ----------------------------------------------------------------
 
 def test_healthz_reports_offline_without_key(client):

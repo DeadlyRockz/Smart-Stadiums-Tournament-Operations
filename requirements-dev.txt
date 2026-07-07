@@ -1,0 +1,4 @@
+# Development / CI tooling — not needed to run the app.
+-r requirements.txt
+ruff>=0.5         # lint (configured in pyproject.toml)
+coverage>=7.0     # test coverage; the suite is held at 100% of app/

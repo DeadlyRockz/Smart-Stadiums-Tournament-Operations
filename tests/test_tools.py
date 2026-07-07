@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app import data
+from app import data, tools
 from app.tools import (
     CONGESTION_LEVELS,
     execute_tool,
@@ -138,6 +138,12 @@ def test_get_live_status_quiet_entrance_is_accessible_gate():
         assert get_live_status("seattle", hour=hour)["quiet_entrance"] in accessible
 
 
+def test_get_live_status_invalid_hour_falls_back_to_current_hour():
+    status = get_live_status("seattle", hour="not-a-number")
+    assert "error" not in status
+    assert 0 <= status["hour_utc"] <= 23
+
+
 def test_get_live_status_elevator_outage_keyed_to_gate_name():
     # Deterministic seed known to produce an outage.
     status = get_live_status("mexico-city", hour=0)
@@ -174,6 +180,16 @@ def test_plan_visit_structured_steps():
 
     services_step = plan["steps"][2]
     assert {"water", "first_aid", "nursing_room"} <= set(services_step)
+
+
+def test_plan_visit_includes_elevator_outage_warning_step():
+    # Deterministic seed known to produce an outage (see the live-status test).
+    plan = plan_visit("mexico-city", ["mobility"], hour=0)
+    actions = [step["action"] for step in plan["steps"]]
+    assert "elevator_outage_warning" in actions
+    warning = plan["steps"][actions.index("elevator_outage_warning")]
+    assert warning["gate"]
+    assert "out of service" in warning["note"]
 
 
 def test_plan_visit_invalid_needs_fall_back_with_note():
@@ -241,3 +257,15 @@ def test_execute_tool_validates_need_enum_via_fallback():
 def test_execute_tool_matches_direct_call_for_pinned_hour():
     raw = execute_tool("get_live_status", {"venue_id": "seattle", "hour": 9})
     assert json.loads(raw) == get_live_status("seattle", hour=9)
+
+
+def test_execute_tool_internal_failure_returns_error_json(monkeypatch):
+    # Defensive path: even if a registered tool raises, the dispatcher must
+    # return an error payload instead of propagating the exception upstream.
+    def _boom(venue_id):
+        raise RuntimeError("simulated internal failure")
+
+    monkeypatch.setitem(tools._TOOL_REGISTRY, "get_venue_info", (_boom, ("venue_id",)))
+    parsed = json.loads(execute_tool("get_venue_info", {"venue_id": "dallas"}))
+    assert "error" in parsed
+    assert "get_venue_info" in parsed["error"]

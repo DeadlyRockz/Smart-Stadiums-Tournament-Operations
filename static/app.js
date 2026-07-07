@@ -58,6 +58,12 @@ function appendMessage(role, text) {
   const wrap = document.createElement("div");
   wrap.className = "msg msg--" + role;
 
+  // Errors ("status" bubbles) are announced immediately by assistive tech,
+  // not queued behind the polite log.
+  if (role === "status") {
+    wrap.setAttribute("role", "alert");
+  }
+
   const author = document.createElement("span");
   author.className = "msg__author";
   // textContent keeps this a plain string, never parsed as HTML.
@@ -122,11 +128,16 @@ function setOfflineBanner(isOffline) {
 // Language / direction
 // =====================================================================
 
-/** Reflect the chosen language on the transcript container. */
+/** Reflect the chosen language on the transcript and the composer input. */
 function applyLanguage() {
   const lang = els.language.value;
+  const dir = lang === "ar" ? "rtl" : "ltr";
   els.transcript.setAttribute("lang", lang);
-  els.transcript.setAttribute("dir", lang === "ar" ? "rtl" : "ltr");
+  els.transcript.setAttribute("dir", dir);
+  // The composer holds text typed in the chosen language, so screen readers
+  // and the caret/text direction must follow it too (RTL for Arabic).
+  els.input.setAttribute("lang", lang);
+  els.input.setAttribute("dir", dir);
 }
 
 // =====================================================================
@@ -227,10 +238,12 @@ async function sendMessage(rawText) {
   appendMessage("user", text);
   pushHistory("user", text);
 
-  // Lock the UI while the request is in flight.
+  // Lock the UI while the request is in flight. aria-busy tells assistive
+  // tech the log is updating; queued changes are announced when it clears.
   inFlight = true;
   els.send.disabled = true;
   els.input.value = "";
+  els.transcript.setAttribute("aria-busy", "true");
 
   // The streaming bubble is hidden from assistive tech: partial tokens must not
   // be announced one-by-one in the aria-live log. The completed reply is added
@@ -330,6 +343,7 @@ async function sendMessage(rawText) {
   } finally {
     inFlight = false;
     els.send.disabled = false;
+    els.transcript.setAttribute("aria-busy", "false");
     els.input.focus(); // return focus to the input after sending
   }
 }

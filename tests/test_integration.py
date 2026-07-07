@@ -9,7 +9,9 @@ from app.schemas import ChatRequest
 from tests.conftest import FakeResponse
 
 
-def test_live_roundtrip_through_api(client, patch_gemini, make_function_call, venue_id, monkeypatch):
+def test_live_roundtrip_through_api(
+    client, patch_gemini, make_function_call, venue_id, monkeypatch
+):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
 

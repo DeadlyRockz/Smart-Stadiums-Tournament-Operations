@@ -35,6 +35,15 @@
 </header>
 
 <main class="app-main">
+  <!-- Graceful fallback when JavaScript is unavailable (WCAG robustness). -->
+  <noscript>
+    <div class="noscript-banner" role="alert">
+      <span class="offline-banner__icon" aria-hidden="true">&#9432;</span>
+      <span>AccessMate needs JavaScript to run the chat. Please enable JavaScript,
+      or contact stadium staff for accessibility assistance.</span>
+    </div>
+  </noscript>
+
   <!--
     Offline-mode banner. Hidden until a reply arrives with mode "offline".
     role="status" announces it politely; meaning is carried by text + an icon

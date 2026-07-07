@@ -6,9 +6,9 @@ blocked-response guard, and every offline-fallback trigger.
 """
 
 import pytest
+from google.genai import errors, types
 
 from app import assistant
-from google.genai import errors, types
 
 VENUE = "new-york-new-jersey"
 
@@ -116,6 +116,31 @@ def test_blocked_none_text_returns_polite_decline(monkeypatch):
     assert reply.text == assistant._DECLINE["es"]  # localized decline
 
 
+def test_decline_in_unsupported_language_falls_back_to_english(monkeypatch):
+    _with_key(monkeypatch)
+    client = _FakeClient([_FakeResponse(text=None)])  # blocked / SAFETY
+    _patch_client(monkeypatch, client)
+
+    reply = assistant.answer("something blocked", profile={"language": "de"})
+
+    assert reply.text == assistant._DECLINE["en"]  # no German decline available
+
+
+def test_history_turns_without_text_are_skipped(monkeypatch):
+    _with_key(monkeypatch)
+    client = _FakeClient([_FakeResponse(text="ok")])
+    _patch_client(monkeypatch, client)
+
+    assistant.answer(
+        "next question",
+        profile={"language": "en"},
+        history=[{"role": "user", "text": ""}, {"role": "assistant"}],
+    )
+
+    # Both malformed turns are dropped; only the current user turn survives.
+    assert len(client.contents_snapshots[0]) == 1
+
+
 def test_client_error_401_falls_back_to_offline(monkeypatch):
     _with_key(monkeypatch)
 
@@ -173,6 +198,20 @@ def test_server_error_falls_back_to_offline(monkeypatch):
             @staticmethod
             def generate_content(*, model, contents, config):
                 raise errors.ServerError(503, {"error": {"message": "unavailable"}})
+
+    _patch_client(monkeypatch, _RaisingClient())
+    reply = assistant.answer("hello", profile={"language": "en"})
+    assert reply.mode == "offline"
+
+
+def test_connection_error_falls_back_to_offline(monkeypatch):
+    _with_key(monkeypatch)
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content(*, model, contents, config):
+                raise ConnectionError("network down")
 
     _patch_client(monkeypatch, _RaisingClient())
     reply = assistant.answer("hello", profile={"language": "en"})

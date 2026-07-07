@@ -11,8 +11,9 @@ structured venue dataset.
 
 It runs in two modes:
 
-- **Live mode** — Google **Gemini** (`gemini-3.5-flash`) drives a function-calling
-  loop over the venue tools.
+- **Live mode** — Google **Gemini** (`gemini-3.5-flash` by default; override with
+  `GEMINI_MODEL` to match your key's tier) drives a function-calling loop over
+  the venue tools.
 - **Offline mode** — a deterministic keyword/intent engine answers from the same
   tools with **no API key and no network**, so evaluators can run the whole app
   with zero credentials. The app auto-selects offline when no key is set or the
@@ -104,9 +105,10 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. (Optional) enable live Gemini mode with a free Google AI Studio key
+# 3. (Optional) enable live Gemini mode with a Google AI Studio key
 cp .env.example .env               # then edit, or just export the variable:
 export GEMINI_API_KEY="your-key"   # omit entirely to run in offline mode
+# export GEMINI_MODEL="..."        # optional: model id matching your key's tier
 
 # 4. Run the app
 uvicorn app.main:app --reload
@@ -114,10 +116,13 @@ uvicorn app.main:app --reload
 ```
 
 Without a key the app boots and answers in **offline mode** — no credentials
-needed. Get a free key at <https://aistudio.google.com/> to enable live mode; the
-key is read from the environment and is **never** written to the repo.
+needed. Get a key at <https://aistudio.google.com/> to enable live mode; the
+key is read from the environment and is **never** written to the repo. If the
+configured model id is not available to your key, the app degrades to offline
+mode instead of failing.
 
-**API surface:** `POST /api/chat`, `GET /api/venues`, `GET /api/venues/{id}`,
+**API surface:** `POST /api/chat`, `POST /api/chat/stream` (NDJSON streaming),
+`GET /api/venues`, `GET /api/venues/search?q=`, `GET /api/venues/{id}`,
 `GET /healthz` (reports `{"llm": "live"|"offline"}`), and the UI at `/`.
 
 ---
@@ -149,22 +154,34 @@ key is read from the environment and is **never** written to the repo.
 
 ---
 
-## 5. Testing
+## 5. Testing & code quality
 
 ```bash
-python -m pytest            # 111 tests, no network required
+python -m pytest            # 144 tests, no network required
+
+# Optional dev tooling (requirements-dev.txt): lint + coverage gate
+pip install -r requirements-dev.txt
+python -m ruff check app tests            # lint: zero findings
+python -m coverage run -m pytest && python -m coverage report  # 100% of app/
 ```
 
-The suite (in `tests/`) covers every `app/` module: the data layer, both engines
-(including Arabic routing, clitic handling, and localized templates), the tool
-dispatcher (valid/invalid venues, determinism of the simulated feed), the Gemini
-loop with a **fully mocked** client (function-call round-trip, blocked-response
-guard, every offline-fallback trigger), the FastAPI layer (happy path, a 422
-input-validation matrix, 404, 429 rate-limit burst, security headers, health
-live/offline, static serving, key-non-leak), the rate limiters (bucket pruning,
-thread-safety under concurrent load, Redis wiring and startup selection), and
-full-stack integration in both modes. Verified green from a clean virtual
-environment installed only from `requirements.txt`.
+The suite (in `tests/`) covers **100% of every line in `app/`**: the data layer
+(including venue search), both engines (Arabic routing, clitic handling,
+localized templates, profile-need fallbacks, outage warnings), the tool
+dispatcher (valid/invalid venues, determinism of the simulated feed, defensive
+error paths), the Gemini loop with a **fully mocked** client (function-call
+round-trip, blocked-response guard, every offline-fallback trigger — including
+streaming: mid-stream drop, empty stream, 400 re-raise), the FastAPI layer
+(happy path, a 422 input-validation matrix, 404, 429 rate-limit burst, security
+headers, health live/offline, static serving, key-non-leak, error frames with
+no traceback leak), the rate limiters (bucket pruning, thread-safety under
+concurrent load, Redis wiring and startup selection), and full-stack
+integration in both modes. Verified green from a clean virtual environment
+installed only from `requirements.txt`.
+
+**Tooling:** `ruff` (rules in `pyproject.toml`) passes with zero findings, and a
+GitHub Actions workflow (`.github/workflows/ci.yml`) runs lint + tests on every
+push, failing if coverage drops below 100%.
 
 ---
 
@@ -201,10 +218,16 @@ environment installed only from `requirements.txt`.
   `fieldset`/`legend`. Full keyboard operability; visible `:focus-visible`
   indicators; focus returns to the input after sending.
 - WCAG-minded styling: light **and** dark themes (`prefers-color-scheme`),
-  `prefers-reduced-motion` honoured, rem-based sizing, ≥4.5:1 text contrast, and no
-  meaning conveyed by colour alone (author labels "You:" / "AccessMate:").
-- Right-to-left support for Arabic; answers are concise and plain (no decorative
-  emoji or ASCII art) for screen-reader clarity.
+  `prefers-reduced-motion` honoured, **forced-colors (Windows High Contrast)
+  support**, rem-based sizing, ≥4.5:1 text contrast, and no meaning conveyed by
+  colour alone (author labels "You:" / "AccessMate:").
+- Screen-reader-safe streaming: partial tokens are hidden (`aria-hidden`) and the
+  transcript is marked `aria-busy` while a reply streams, then the complete reply
+  is announced exactly once; errors are `role="alert"` so they are never missed.
+- Right-to-left support for Arabic — the transcript **and the message input**
+  switch `lang`/`dir`; answers are concise and plain (no decorative emoji or
+  ASCII art) for screen-reader clarity.
+- A `<noscript>` fallback explains the requirement instead of a silent blank page.
 
 ---
 
@@ -212,10 +235,10 @@ environment installed only from `requirements.txt`.
 
 | Criterion | Where it is addressed |
 |---|---|
-| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions; typed; docstrings; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
+| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions; typed; docstrings; `ruff` lint passes clean (config in `pyproject.toml`); CI enforces lint + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
 | **Security** | Section 6 — no secrets, strict CSP + headers, XSS-safe rendering, input caps, rate limiting, prompt-injection hygiene, key never leaked. |
 | **Efficiency** | Dataset loaded once and cached (`lru_cache`); stateless requests; frozen system prompt for a stable cache prefix; tools return compact dicts; offline mode avoids any network call. |
-| **Testing** | Section 5 — 111 tests across every module, network fully mocked, green from a clean venv. |
+| **Testing** | Section 5 — 144 tests, **100% line coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |
 | **Accessibility** | Section 7 — WCAG-minded, screen-reader-first UI, plus accessibility *is* the product domain. |
 | **Problem Statement Alignment** | A smart, dynamic stadium assistant that makes **context-driven decisions** (profile + live feed → tailored routes/answers) for a chosen FIFA WC 2026 vertical — exactly the challenge's stated expectations. |
 

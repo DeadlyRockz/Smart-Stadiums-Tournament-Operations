@@ -13,7 +13,7 @@ hour, marked ``"simulated": true``. No network access.
 
 import json
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app import data
@@ -187,12 +187,12 @@ def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
     if venue is None:
         return _venue_error(venue_id)
     if hour is None:
-        hour = datetime.now(timezone.utc).hour
+        hour = datetime.now(UTC).hour
     else:
         try:
             hour = int(hour) % 24
         except (TypeError, ValueError):
-            hour = datetime.now(timezone.utc).hour
+            hour = datetime.now(UTC).hour
     rng = random.Random(f"{venue_id}-{hour}")
     gates = venue["accessibility"]["gates"]
     gate_congestion = [

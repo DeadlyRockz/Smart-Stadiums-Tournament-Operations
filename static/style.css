@@ -228,6 +228,23 @@ body::before {
   box-shadow: var(--shadow-sm);
 }
 
+/* ---- No-JavaScript fallback banner (same visual language as the offline
+   banner; shown only inside <noscript>) ---- */
+.noscript-banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  padding: 0.8rem 1.05rem;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 0.09375rem solid color-mix(in srgb, var(--error-text) 35%, transparent);
+  border-radius: var(--radius);
+  font-size: 0.94rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
 /* ---- Offline banner ---- */
 .offline-banner {
   display: flex;
@@ -613,6 +630,24 @@ input:focus:not(:focus-visible) {
   /* flex:1 fills the card; min-height:0 lets it shrink below content so
      overflow-y kicks in instead of stretching the card. */
   .transcript { max-height: none; min-height: 0; }
+}
+
+/* ---- Forced colors (Windows High Contrast): backgrounds and shadows are
+   stripped by the platform, so give every meaningful surface a real border
+   and let system colours carry the contrast. ---- */
+@media (forced-colors: active) {
+  .card,
+  .msg,
+  .offline-banner,
+  .noscript-banner,
+  .chip,
+  .composer__send,
+  .transcript {
+    border: 0.0625rem solid CanvasText;
+    box-shadow: none;
+  }
+  .chat__dot { background: CanvasText; }
+  .msg--user { border-width: 0.125rem; } /* author still marked by text label */
 }
 
 /* ---- Motion: respect reduced-motion ---- */

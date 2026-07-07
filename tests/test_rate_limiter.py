@@ -26,7 +26,6 @@ from app.main import (
     _build_rate_limiter,
 )
 
-
 # --------------------------------------------------------------- pruning
 
 def test_prune_evicts_full_buckets_and_keeps_active_ones():

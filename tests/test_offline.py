@@ -61,6 +61,17 @@ def test_unknown_language_code_falls_back_to_english():
     assert "Accessibility at AT&T Stadium" in answer
 
 
+def test_language_detected_from_message_when_profile_has_none():
+    # No profile language: the Spanish keyword match picks the es template.
+    answer = offline_answer("hola", {})
+    assert "Copa Mundial" in answer
+
+
+def test_unmatched_message_without_profile_language_falls_back_to_english():
+    answer = offline_answer("qwertyuiop", {})
+    assert "I can help" in answer
+
+
 # ------------------------------------------------------------------- arabic
 
 def test_arabic_greeting_uses_arabic_template():
@@ -124,6 +135,39 @@ def test_arabic_answers_are_deterministic():
     assert offline_answer(msg, prof) == offline_answer(msg, prof)
 
 
+# ------------------------------------------------------------ profile needs
+
+def test_profile_need_used_when_message_has_no_need_keyword():
+    answer = offline_answer(
+        "Is the stadium accessible?",
+        profile("en", "new-york-new-jersey", ["hearing"]),
+    )
+    assert "Assistive listening" in answer
+
+
+def test_invalid_profile_need_falls_back_to_general():
+    answer = offline_answer(
+        "Is the stadium accessible?",
+        profile("en", "new-york-new-jersey", ["flying"]),
+    )
+    assert "Accessible gates" in answer  # the general view shows the full set
+
+
+# ----------------------------------------------------------------- services
+
+def test_generic_services_question_lists_all_three_services():
+    # A services-intent message with no specific service keyword falls back to
+    # describing all three (nursing room, first aid, prayer space).
+    from app import data
+    from app.offline import _services_answer
+
+    venue = data.get_venue("new-york-new-jersey")
+    answer = _services_answer(venue, "services", "en")
+    assert "nursing room" in answer
+    assert "First aid" in answer
+    assert "Prayer space" in answer
+
+
 # --------------------------------------------------------------- navigation
 
 def test_navigation_question_mentions_a_gate():
@@ -132,6 +176,21 @@ def test_navigation_question_mentions_a_gate():
     )
     assert "Recommended entrance" in answer
     assert "Northwest Gate" in answer or "Southeast Gate" in answer
+
+
+def test_navigation_answer_warns_about_elevator_outage(monkeypatch):
+    from app import tools
+
+    real = tools.get_live_status
+    # Pin the simulated feed to a seed known to produce an outage (hour 0).
+    monkeypatch.setattr(
+        "app.offline.tools.get_live_status",
+        lambda venue_id, hour=None: real(venue_id, hour=0),
+    )
+    answer = offline_answer(
+        "Which gate should I use?", profile("en", "mexico-city")
+    )
+    assert "out of service" in answer
 
 
 # ------------------------------------------------------------------ no venue
@@ -172,6 +231,14 @@ def test_schedule_final_date():
         "When is the final?", profile("en", "new-york-new-jersey")
     )
     assert "2026-07-19" in answer
+
+
+def test_schedule_opening_match_for_hosting_venue():
+    answer = offline_answer(
+        "When is the opening match?", profile("en", "mexico-city")
+    )
+    assert "opening match" in answer
+    assert "2026-06-11" in answer
 
 
 def test_schedule_works_without_venue_in_french():

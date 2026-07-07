@@ -59,3 +59,12 @@ def test_search_venues_is_case_insensitive():
 
     mexico = search_venues("MEXICO")
     assert any(v["id"] == "mexico-city" for v in mexico)
+
+
+def test_search_venues_blank_query_returns_nothing():
+    assert search_venues("") == []
+    assert search_venues("   ") == []
+
+
+def test_search_venues_no_match_returns_empty_list():
+    assert search_venues("atlantis") == []

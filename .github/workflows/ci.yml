@@ -1,0 +1,29 @@
+# Lint + full test suite with 100% coverage enforced, on every push and PR.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: python -m ruff check app tests
+
+      - name: Tests with coverage (fails under 100%)
+        run: |
+          python -m coverage run -m pytest
+          python -m coverage report

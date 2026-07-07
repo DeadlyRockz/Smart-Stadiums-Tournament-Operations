@@ -14,8 +14,8 @@ the whole app with no credentials.
 """
 
 import os
-from dataclasses import dataclass, field
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from google import genai
@@ -23,9 +23,12 @@ from google.genai import errors, types
 
 from app import offline, tools
 
-#: Stable GA model available on the free tier and supporting function calling.
-#: Do NOT change to gemini-2.x/1.5 (shut down) or a Pro model (not free-tier).
-MODEL = "gemini-3.5-flash"
+#: Gemini model driving the live path; must support function calling. Override
+#: with the GEMINI_MODEL environment variable to match your key's tier (for
+#: example a free-tier key may need a different flash model id). If the
+#: configured id is not available to the key, the API returns 404 and the app
+#: degrades to offline mode instead of failing.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 
 #: Iteration cap on the function-calling loop — prevents runaway tool loops.
 _MAX_TOOL_ITERATIONS = 8

@@ -7,6 +7,8 @@ blocked-response decline, offline fallback, and the NDJSON endpoint contract.
 
 import json
 
+import pytest
+
 from app import assistant
 
 VENUE = "new-york-new-jersey"
@@ -135,6 +137,58 @@ def test_server_error_before_any_text_falls_back_offline(monkeypatch):
     assert events[0] == ("meta", "offline")
 
 
+def test_stream_400_client_error_is_reraised(monkeypatch):
+    _with_key(monkeypatch)
+    from google.genai import errors
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content_stream(*, model, contents, config):
+                raise errors.ClientError(400, {"error": {"message": "our bug"}})
+
+    monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _RaisingClient())
+
+    # A 400 is our own malformed request — surface it, never mask it as offline.
+    with pytest.raises(errors.ClientError):
+        list(assistant.answer_stream("hi", {"language": "en"}))
+
+
+def test_midstream_failure_after_first_delta_ends_stream_gracefully(
+    monkeypatch, text_chunk
+):
+    _with_key(monkeypatch)
+
+    def _chunks():
+        yield text_chunk("Partial ")
+        raise ConnectionError("connection dropped mid-stream")
+
+    class _Client:
+        class models:
+            @staticmethod
+            def generate_content_stream(*, model, contents, config):
+                return _chunks()
+
+    monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _Client())
+
+    events = list(assistant.answer_stream("hi", {"language": "en"}))
+
+    # The partial answer was already sent; the stream ends without raising.
+    assert events == [("meta", "live"), ("delta", "Partial ")]
+
+
+def test_empty_live_stream_yields_live_decline(monkeypatch):
+    _with_key(monkeypatch)
+    # Defensive branch: the live event generator ends without yielding anything.
+    monkeypatch.setattr(
+        "app.assistant._live_stream_events", lambda *a, **k: iter(())
+    )
+
+    events = list(assistant.answer_stream("hi", {"language": "en"}))
+
+    assert events == [("meta", "live"), ("delta", assistant._DECLINE["en"])]
+
+
 # --- /api/chat/stream endpoint ------------------------------------------------
 
 def test_endpoint_streams_ndjson_offline(client, monkeypatch):
@@ -175,6 +229,24 @@ def test_endpoint_streams_live_deltas(client, monkeypatch, patch_gemini_stream, 
     assert frames[0]["type"] == "meta" and frames[0]["mode"] == "live"
     text = "".join(f["text"] for f in frames if f["type"] == "delta")
     assert text == "Gate A is quietest."
+
+
+def test_endpoint_emits_error_frame_and_no_traceback_when_stream_raises(
+    client, monkeypatch
+):
+    _no_key(monkeypatch)
+
+    def _broken_stream(*a, **k):
+        yield ("meta", "offline")
+        raise RuntimeError("boom-sentinel")
+
+    monkeypatch.setattr("app.main.assistant.answer_stream", _broken_stream)
+
+    res = client.post("/api/chat/stream", json={"message": "hi"})
+    assert res.status_code == 200
+    frames = [json.loads(line) for line in res.text.splitlines() if line.strip()]
+    assert frames[-1] == {"type": "error"}
+    assert "boom-sentinel" not in res.text  # stack traces never leak downstream
 
 
 def test_endpoint_rate_limited_returns_429(client, monkeypatch):

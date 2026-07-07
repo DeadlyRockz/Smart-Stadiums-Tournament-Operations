@@ -1,3 +1,17 @@
+[project]
+name = "accessmate"
+version = "1.0.0"
+description = "Accessibility-first stadium copilot for the FIFA World Cup 2026 (Smart Stadiums & Tournament Operations)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "google-genai>=1.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.30",
+    "pydantic>=2.0",
+]
+
 [tool.pytest.ini_options]
 # Run the suite with `python -m pytest` from the project root.
 testpaths = ["tests"]
@@ -8,3 +22,37 @@ filterwarnings = [
     "ignore::DeprecationWarning:google.genai.types",
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
+
+[tool.ruff]
+# Lint with `python -m ruff check app tests` (see requirements-dev.txt).
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort (import order)
+    "N",   # pep8-naming
+    "UP",  # pyupgrade (modern syntax)
+    "B",   # flake8-bugbear (likely bugs)
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-native rules
+]
+# The Arabic keyword tables and their docstrings legitimately contain letters
+# the confusable detector maps to Latin lookalikes.
+allowed-confusables = ["ا", "أ", "إ", "آ", "ئ", "ي", "و", "ه"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test fakes deliberately mirror the google-genai client attribute shape
+# (`client.models.generate_content`), so the inner class is named `models`.
+"tests/*" = ["N801"]
+
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
