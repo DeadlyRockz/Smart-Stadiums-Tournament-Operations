@@ -4,6 +4,8 @@ Serves the accessible chat UI (static/) and a small JSON API. Security posture:
 - Strict security headers on every response (CSP default-src 'self', nosniff,
   no-referrer, X-Frame-Options DENY) — set by middleware.
 - Per-client-IP token-bucket rate limit on the chat endpoint (429 on burst).
+  In-memory by default (bounded: idle buckets are pruned); set REDIS_URL to
+  share the limit across replicas behind a load balancer.
 - Input caps enforced by the Pydantic models in app.schemas (422 on violation).
 - Stateless: chat content is never persisted and message bodies are never
   logged; history round-trips through the client.
@@ -12,6 +14,8 @@ Serves the accessible chat UI (static/) and a small JSON API. Security posture:
   live/offline mode.
 """
 
+import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -29,10 +33,15 @@ from app.schemas import (
     VenueSummary,
 )
 
+logger = logging.getLogger("accessmate")
+
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 #: Chat requests allowed per client IP per minute (free-tier-friendly ceiling).
 RATE_LIMIT_PER_MIN = 20
+
+#: Prune idle in-memory buckets once the map grows past this many client keys.
+_BUCKET_PRUNE_THRESHOLD = 1024
 
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
@@ -47,18 +56,42 @@ _SECURITY_HEADERS = {
 
 
 class TokenBucketLimiter:
-    """In-memory per-key token bucket. Thread-safe; monotonic-clock based."""
+    """In-memory per-key token bucket. Thread-safe; monotonic-clock based.
 
-    def __init__(self, capacity: int, refill_seconds: float) -> None:
+    Memory is bounded: once the bucket map exceeds ``prune_threshold`` keys, a
+    new-key request first evicts every fully-refilled bucket. A missing key
+    defaults to a full bucket, so evicting a refilled one is behaviourally a
+    no-op — it just stops unique client IPs from growing the map without limit.
+    """
+
+    def __init__(
+        self,
+        capacity: int,
+        refill_seconds: float,
+        prune_threshold: int = _BUCKET_PRUNE_THRESHOLD,
+    ) -> None:
         self.capacity = float(capacity)
         self._refill_rate = capacity / refill_seconds  # tokens per second
+        self._prune_threshold = prune_threshold
         self._buckets: dict[str, tuple[float, float]] = {}
         self._lock = threading.Lock()
+
+    def _prune(self, now: float) -> None:
+        """Drop buckets that have refilled to capacity (caller holds the lock)."""
+        full = [
+            key
+            for key, (tokens, last) in self._buckets.items()
+            if tokens + (now - last) * self._refill_rate >= self.capacity
+        ]
+        for key in full:
+            del self._buckets[key]
 
     def allow(self, key: str) -> bool:
         """Consume one token for ``key``; False when the bucket is empty."""
         now = time.monotonic()
         with self._lock:
+            if key not in self._buckets and len(self._buckets) >= self._prune_threshold:
+                self._prune(now)
             tokens, last = self._buckets.get(key, (self.capacity, now))
             tokens = min(self.capacity, tokens + (now - last) * self._refill_rate)
             if tokens < 1.0:
@@ -73,7 +106,98 @@ class TokenBucketLimiter:
             self._buckets.clear()
 
 
-rate_limiter = TokenBucketLimiter(RATE_LIMIT_PER_MIN, 60.0)
+class RedisTokenBucketLimiter:
+    """Distributed token bucket backed by Redis; atomic via a Lua script.
+
+    Interface-compatible with :class:`TokenBucketLimiter` (``allow``/``reset``)
+    but the ceiling is shared across every app replica, so a client cannot
+    multiply its quota by spreading requests across containers behind a load
+    balancer. Idle keys expire on a TTL, so Redis memory stays bounded without
+    an explicit prune. Uses wall-clock time (``time.time``) rather than a
+    monotonic clock because replicas need a shared, comparable time source
+    (assumes NTP-synced hosts; sub-second skew is negligible for a per-minute
+    bucket).
+    """
+
+    #: Atomic refill-and-consume. KEYS[1]=bucket; ARGV=capacity, rate, now, ttl.
+    #: Returns 1 when a token was consumed, 0 when the bucket was empty.
+    _LUA = """
+    local cap  = tonumber(ARGV[1])
+    local rate = tonumber(ARGV[2])
+    local now  = tonumber(ARGV[3])
+    local ttl  = tonumber(ARGV[4])
+    local b = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+    local tokens = tonumber(b[1])
+    local ts = tonumber(b[2])
+    if tokens == nil then tokens = cap; ts = now end
+    local elapsed = now - ts
+    if elapsed < 0 then elapsed = 0 end
+    tokens = math.min(cap, tokens + elapsed * rate)
+    local allowed = 0
+    if tokens >= 1 then tokens = tokens - 1; allowed = 1 end
+    redis.call('HMSET', KEYS[1], 'tokens', tokens, 'ts', now)
+    redis.call('EXPIRE', KEYS[1], ttl)
+    return allowed
+    """
+
+    def __init__(
+        self,
+        client,
+        capacity: int,
+        refill_seconds: float,
+        namespace: str = "accessmate:rl:",
+    ) -> None:
+        self.capacity = float(capacity)
+        self._refill_rate = capacity / refill_seconds
+        # Idle keys refill fully after refill_seconds; let them expire a bit later.
+        self._ttl_seconds = int(refill_seconds) + 10
+        self._client = client
+        self._namespace = namespace
+        self._script = client.register_script(self._LUA)
+
+    def allow(self, key: str) -> bool:
+        """Consume one token for ``key`` atomically across replicas."""
+        allowed = self._script(
+            keys=[self._namespace + key],
+            args=[self.capacity, self._refill_rate, time.time(), self._ttl_seconds],
+        )
+        return bool(int(allowed))
+
+    def reset(self) -> None:
+        """Delete this limiter's keys only (used by tests); never FLUSHes."""
+        keys = list(self._client.scan_iter(match=self._namespace + "*"))
+        if keys:
+            self._client.delete(*keys)
+
+
+def _build_rate_limiter():
+    """Choose the rate limiter for this process.
+
+    Uses Redis when ``REDIS_URL`` is set and reachable so the limit holds across
+    replicas; otherwise the in-memory limiter. A missing or unreachable Redis
+    (or the client library not installed) logs a warning and falls back rather
+    than failing startup — the zero-infra default must always run.
+    """
+    url = os.environ.get("REDIS_URL")
+    if not url:
+        return TokenBucketLimiter(RATE_LIMIT_PER_MIN, 60.0)
+    try:
+        import redis  # optional dependency; only needed for distributed mode
+
+        client = redis.Redis.from_url(url, decode_responses=True)
+        client.ping()
+    except Exception as exc:  # ImportError, connection/auth error, etc.
+        logger.warning(
+            "REDIS_URL is set but Redis is unavailable (%s); "
+            "falling back to in-memory rate limiting.",
+            exc,
+        )
+        return TokenBucketLimiter(RATE_LIMIT_PER_MIN, 60.0)
+    logger.info("Rate limiting via Redis (shared across replicas).")
+    return RedisTokenBucketLimiter(client, RATE_LIMIT_PER_MIN, 60.0)
+
+
+rate_limiter = _build_rate_limiter()
 
 app = FastAPI(
     title="AccessMate API",

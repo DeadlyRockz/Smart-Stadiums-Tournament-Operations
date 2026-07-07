@@ -61,6 +61,69 @@ def test_unknown_language_code_falls_back_to_english():
     assert "Accessibility at AT&T Stadium" in answer
 
 
+# ------------------------------------------------------------------- arabic
+
+def test_arabic_greeting_uses_arabic_template():
+    # "Peace be upon you" — a greeting; must not fall back to English.
+    answer = offline_answer("السلام عليكم", profile("ar", None))
+    assert "AccessMate" in answer
+    assert "FIFA" in answer
+    assert "مرحبا" in answer  # Arabic "hello", proves the ar template was used
+
+
+def test_arabic_wheelchair_question_routes_and_renders_in_arabic():
+    # "Where is the route for the wheelchair?" -> accessibility, ar template.
+    answer = offline_answer(
+        "أين مسار الكرسي المتحرك؟", profile("ar", "new-york-new-jersey")
+    )
+    assert "إمكانية الوصول في MetLife Stadium" in answer  # ar intro + venue fact
+    assert "البوابات المتاحة" in answer                    # ar "accessible gates"
+    assert "MetLife Gate" in answer                        # dataset gate name
+
+
+def test_arabic_schedule_final_date():
+    # "When is the final?" -> schedule, ar template, real date interpolated.
+    answer = offline_answer("متى النهائي؟", profile("ar", "new-york-new-jersey"))
+    assert "المباراة النهائية" in answer
+    assert "2026-07-19" in answer
+
+
+def test_arabic_food_water_localized():
+    answer = offline_answer("أين الماء؟", profile("ar", "guadalajara"))
+    assert "الماء في Estadio Akron" in answer
+
+
+def test_arabic_unverified_venue_gets_caveat_in_arabic():
+    answer = offline_answer("هل يوجد منحدر؟", profile("ar", "dallas"))
+    assert "لم يتم التحقق" in answer  # "not yet verified", in Arabic
+
+
+def test_arabic_no_venue_prompt_is_localized():
+    answer = offline_answer("هل يوجد غرفة حسية؟", profile("ar", None))
+    assert "من فضلك اختر" in answer      # "please choose", in Arabic
+    assert "MetLife Stadium" in answer   # examples still listed
+
+
+def test_arabic_clitic_prefixed_keyword_still_matches():
+    # "...my child with autism" — the preposition/article glue onto the noun
+    # ("بالتوحد"); the engine must still route to the sensory accessibility path.
+    answer = offline_answer(
+        "أريد مكاناً هادئاً لطفلي المصاب بالتوحد", profile("ar", "los-angeles")
+    )
+    assert "الدعم الحسي" in answer  # "sensory support" field label, in Arabic
+
+
+def test_arabic_profile_language_overrides_english_message():
+    # English words route the intent, but the ar profile picks the template.
+    answer = offline_answer("Is there wheelchair access?", profile("ar", "dallas"))
+    assert "إمكانية الوصول في AT&T Stadium" in answer
+
+
+def test_arabic_answers_are_deterministic():
+    msg, prof = "أين المصعد؟", profile("ar", "los-angeles")
+    assert offline_answer(msg, prof) == offline_answer(msg, prof)
+
+
 # --------------------------------------------------------------- navigation
 
 def test_navigation_question_mentions_a_gate():

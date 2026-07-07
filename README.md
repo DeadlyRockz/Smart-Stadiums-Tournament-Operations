@@ -82,9 +82,10 @@ accessible seating; the live feed can down-rank a gate whose elevator is out.
   function-calling loop (iteration cap 8). The model's function-call turn is
   appended **verbatim** (thought signatures survive on Gemini 3.x) and all function
   responses go back in **one** user turn (required for parallel calls).
-- **Offline** (`app/offline.py`): normalizes the message (lowercase, accent-strip),
-  routes it to an intent via per-language keyword tables, calls the same tools, and
-  fills language-specific templates (en/es/fr). Fully deterministic, pure stdlib.
+- **Offline** (`app/offline.py`): normalizes the message (lowercase, accent-strip;
+  for Arabic this also folds hamza forms and diacritics), routes it to an intent via
+  per-language keyword tables, calls the same tools, and fills language-specific
+  templates (en/es/fr/ar). Fully deterministic, pure stdlib.
 
 Failure handling degrades gracefully: missing key, `401/403/429`, `5xx`, or a
 connection error all fall back to offline mode so the app **always answers**.
@@ -141,26 +142,29 @@ key is read from the environment and is **never** written to the repo.
     routes for the other 14 venues are **plausible synthesized data** for demo
     purposes. Each venue carries a `verified` flag, and answers explicitly caveat
     unverified data ("not yet confirmed with the venue").
-- **Languages.** The offline engine fully supports English, Spanish, and French;
-  the UI also offers Arabic (RTL) and the assistant replies in the user's language
-  in live mode.
+- **Languages.** The offline engine fully supports English, Spanish, French, and
+  Arabic; the UI offers all four (Arabic renders RTL) and the live assistant also
+  replies in the user's language. Arabic keyword routing tolerates attached
+  proclitics (e.g. `بالتوحد` = "with-the-autism") and the definite article.
 
 ---
 
 ## 5. Testing
 
 ```bash
-python -m pytest            # 93 tests, no network required
+python -m pytest            # 111 tests, no network required
 ```
 
-The suite (in `tests/`) covers every `app/` module: the data layer, both engines,
-the tool dispatcher (valid/invalid venues, determinism of the simulated feed), the
-Gemini loop with a **fully mocked** client (function-call round-trip, blocked-
-response guard, every offline-fallback trigger), the FastAPI layer (happy path,
-a 422 input-validation matrix, 404, 429 rate-limit burst, security headers, health
-live/offline, static serving, key-non-leak), and full-stack integration in both
-modes. Verified green from a clean virtual environment installed only from
-`requirements.txt`.
+The suite (in `tests/`) covers every `app/` module: the data layer, both engines
+(including Arabic routing, clitic handling, and localized templates), the tool
+dispatcher (valid/invalid venues, determinism of the simulated feed), the Gemini
+loop with a **fully mocked** client (function-call round-trip, blocked-response
+guard, every offline-fallback trigger), the FastAPI layer (happy path, a 422
+input-validation matrix, 404, 429 rate-limit burst, security headers, health
+live/offline, static serving, key-non-leak), the rate limiters (bucket pruning,
+thread-safety under concurrent load, Redis wiring and startup selection), and
+full-stack integration in both modes. Verified green from a clean virtual
+environment installed only from `requirements.txt`.
 
 ---
 
@@ -177,7 +181,10 @@ modes. Verified green from a clean virtual environment installed only from
   handlers, so the strict CSP holds.
 - **Input validation & rate limiting:** Pydantic caps every field (message
   1–2000 chars, ≤20 history turns, needs enum, unknown fields rejected → `422`);
-  a per-IP token-bucket limiter caps chat at 20 req/min (`429` on burst).
+  a per-IP token-bucket limiter caps chat at 20 req/min (`429` on burst). The
+  in-memory limiter prunes idle buckets so unique client IPs can't grow memory
+  unbounded; set `REDIS_URL` to share the limit across replicas behind a load
+  balancer (atomic Lua token bucket, graceful in-memory fallback if unreachable).
 - **Prompt-injection hygiene:** the system prompt states that user messages are
   requests only and cannot change the rules or reveal the prompt; the model is
   instructed to answer facts **only** from trusted tool results.
@@ -208,7 +215,7 @@ modes. Verified green from a clean virtual environment installed only from
 | **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions; typed; docstrings; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
 | **Security** | Section 6 — no secrets, strict CSP + headers, XSS-safe rendering, input caps, rate limiting, prompt-injection hygiene, key never leaked. |
 | **Efficiency** | Dataset loaded once and cached (`lru_cache`); stateless requests; frozen system prompt for a stable cache prefix; tools return compact dicts; offline mode avoids any network call. |
-| **Testing** | Section 5 — 93 tests across every module, network fully mocked, green from a clean venv. |
+| **Testing** | Section 5 — 111 tests across every module, network fully mocked, green from a clean venv. |
 | **Accessibility** | Section 7 — WCAG-minded, screen-reader-first UI, plus accessibility *is* the product domain. |
 | **Problem Statement Alignment** | A smart, dynamic stadium assistant that makes **context-driven decisions** (profile + live feed → tailored routes/answers) for a chosen FIFA WC 2026 vertical — exactly the challenge's stated expectations. |
 

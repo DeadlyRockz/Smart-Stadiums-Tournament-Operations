@@ -1,9 +1,9 @@
 """Deterministic offline fallback assistant.
 
 Runs when no Gemini API key is configured or the live API fails. Routes the
-user's message to an intent via per-language keyword tables (en/es/fr), calls
-the same tool functions the live assistant uses (``app.tools``), and renders
-the result through language-specific templates.
+user's message to an intent via per-language keyword tables (en/es/fr/ar),
+calls the same tool functions the live assistant uses (``app.tools``), and
+renders the result through language-specific templates.
 
 Pure stdlib, deterministic, no network. Output is screen-reader-friendly:
 short plain sentences, no emoji or ASCII art.
@@ -16,7 +16,7 @@ from typing import Any
 
 from app import data, tools
 
-SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "es", "fr")
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "es", "fr", "ar")
 
 #: Intents checked in priority order; first keyword match wins.
 _INTENT_PRIORITY: tuple[str, ...] = (
@@ -50,6 +50,19 @@ _INTENT_KEYWORDS: dict[str, dict[str, tuple[str, ...]]] = {
             "auditif", "sourd", "sourde", "aveugle", "malvoyant", "braille",
             "ascenseur", "rampe", "mobilite", "toilettes",
         ),
+        # Both bare and article-prefixed forms are listed: Arabic attaches the
+        # definite article "ال" directly to the noun, and a word boundary sits
+        # between words, not between "ال" and its stem.
+        "ar": (
+            "كرسي متحرك", "الكرسي المتحرك", "كراسي متحركة", "امكانية الوصول",
+            "اعاقة", "الاعاقة", "معاق", "المعاقين", "ذوي الاحتياجات الخاصة",
+            "حسي", "حسية", "غرفة حسية", "توحد", "التوحد", "هادئ", "هادئة",
+            "مكان هادئ", "سمع", "السمع", "ضعف السمع", "اصم", "الصم",
+            "لغة الاشارة", "سماعة", "اعمى", "المكفوفين", "مكفوف", "بصر",
+            "البصر", "برايل", "مصعد", "المصعد", "مصاعد", "المصاعد", "منحدر",
+            "المنحدر", "مرحاض", "المرحاض", "دورة مياه", "دورة المياه",
+            "دورات المياه", "حمام", "الحمام",
+        ),
     },
     "services": {
         "en": (
@@ -63,6 +76,11 @@ _INTENT_KEYWORDS: dict[str, dict[str, tuple[str, ...]]] = {
         "fr": (
             "allaitement", "allaiter", "bebe", "premiers secours",
             "infirmerie", "priere", "prier",
+        ),
+        "ar": (
+            "رضاعة", "الرضاعة", "ارضاع", "غرفة رضاعة", "رضيع", "حليب",
+            "اسعاف", "الاسعاف", "اسعافات", "اسعافات اولية", "طبي", "طبيب",
+            "رعاية طبية", "صلاة", "الصلاة", "مصلى", "دعاء", "متعدد الاديان",
         ),
     },
     "schedule": {
@@ -78,12 +96,24 @@ _INTENT_KEYWORDS: dict[str, dict[str, tuple[str, ...]]] = {
             "match", "ouverture", "finale", "calendrier", "horaire", "quand",
             "coup d'envoi", "billet",
         ),
+        "ar": (
+            "مباراة", "المباراة", "مباريات", "المباريات", "افتتاح", "الافتتاح",
+            "المباراة الافتتاحية", "افتتاحية", "نهائي", "النهائي",
+            "المباراة النهائية", "نهائية", "جدول", "الجدول", "الجدول الزمني",
+            "موعد", "المواعيد", "متى", "توقيت", "تذكرة", "التذكرة", "تذاكر",
+            "التذاكر", "بطاقة",
+        ),
     },
     "food_water": {
         "en": ("water", "food", "drink", "eat", "thirsty", "hungry", "snack",
                "concession"),
         "es": ("agua", "comida", "comer", "beber", "sed", "hambre"),
         "fr": ("eau", "nourriture", "manger", "boire", "soif", "faim"),
+        "ar": (
+            "ماء", "الماء", "مياه", "المياه", "مياه شرب", "طعام", "الطعام",
+            "اكل", "الاكل", "ماكولات", "شراب", "مشروب", "مشروبات", "عطش",
+            "عطشان", "جوع", "جائع", "وجبة",
+        ),
     },
     "navigation": {
         "en": (
@@ -98,6 +128,12 @@ _INTENT_KEYWORDS: dict[str, dict[str, tuple[str, ...]]] = {
             "porte", "entree", "itineraire", "chemin", "siege", "section",
             "comment aller", "ou est", "ou sont", "acces",
         ),
+        "ar": (
+            "بوابة", "البوابة", "بوابات", "البوابات", "مدخل", "المدخل",
+            "مداخل", "دخول", "مسار", "المسار", "طريق", "الطريق", "طريقي",
+            "مقعد", "المقعد", "مقعدي", "قسم", "القسم", "منطقة", "كيف اصل",
+            "كيف اذهب", "اين", "اتجاهات", "الاتجاهات", "خريطة",
+        ),
     },
     "greeting": {
         "en": ("hello", "hi", "hey", "good morning", "good afternoon",
@@ -105,6 +141,10 @@ _INTENT_KEYWORDS: dict[str, dict[str, tuple[str, ...]]] = {
         "es": ("hola", "buenos dias", "buenas tardes", "buenas noches",
                "ayuda"),
         "fr": ("bonjour", "salut", "bonsoir", "aide"),
+        "ar": (
+            "مرحبا", "السلام عليكم", "السلام", "سلام", "اهلا", "اهلا وسهلا",
+            "صباح الخير", "مساء الخير", "مساعدة", "ساعدني", "هلا",
+        ),
     },
 }
 
@@ -115,31 +155,41 @@ _NEED_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ascensor", "elevador", "ascenseur", "ramp", "rampa", "rampe",
         "step-free", "mobility", "movilidad", "mobilite", "restroom",
         "toilet", "bano", "banos", "toilettes", "seating", "asiento",
+        "كرسي متحرك", "الكرسي المتحرك", "مصعد", "المصعد", "مصاعد", "منحدر",
+        "المنحدر", "مرحاض", "المرحاض", "دورة مياه", "دورة المياه", "حمام",
+        "الحمام", "مقعد", "المقعد", "التنقل", "حركة",
     )),
     ("hearing", (
         "hearing", "deaf", "sordo", "sorda", "auditiva", "audicion", "sourd",
         "sourde", "auditif", "audition", "listening", "caption",
         "sign language",
+        "سمع", "السمع", "ضعف السمع", "اصم", "الصم", "لغة الاشارة", "سماعة",
     )),
     ("vision", (
         "blind", "vision", "sight", "braille", "ciego", "ciega", "aveugle",
         "malvoyant", "vue",
+        "اعمى", "المكفوفين", "مكفوف", "بصر", "البصر", "برايل", "ضعف البصر",
     )),
     ("sensory", (
         "sensory", "sensorial", "sensoriel", "sensorielle", "autism",
         "autistic", "autismo", "autisme", "quiet", "quietest", "noise",
         "ruido", "bruit", "tranquila", "calme",
+        "حسي", "حسية", "توحد", "التوحد", "هادئ", "هادئة", "ضوضاء", "ضجيج",
+        "غرفة حسية",
     )),
 )
 
 #: Keywords picking a specific venue service within the services intent.
 _SERVICE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nursing_room", ("nursing", "breastfeed", "lactation", "lactancia",
-                      "amamantar", "allaitement", "allaiter", "baby", "bebe")),
+                      "amamantar", "allaitement", "allaiter", "baby", "bebe",
+                      "رضاعة", "الرضاعة", "ارضاع", "رضيع", "حليب")),
     ("first_aid", ("first aid", "medical", "medic", "primeros auxilios",
-                   "enfermeria", "premiers secours", "infirmerie")),
+                   "enfermeria", "premiers secours", "infirmerie",
+                   "اسعاف", "الاسعاف", "اسعافات", "طبي", "طبيب", "رعاية طبية")),
     ("prayer_room", ("prayer", "pray", "oracion", "rezar", "priere", "prier",
-                     "multi-faith")),
+                     "multi-faith",
+                     "صلاة", "الصلاة", "مصلى", "دعاء", "متعدد الاديان")),
 )
 
 #: Human-readable congestion levels per language.
@@ -147,6 +197,7 @@ _LEVELS: dict[str, dict[str, str]] = {
     "en": {"low": "low", "moderate": "moderate", "high": "high"},
     "es": {"low": "baja", "moderate": "moderada", "high": "alta"},
     "fr": {"low": "faible", "moderate": "moderee", "high": "elevee"},
+    "ar": {"low": "منخفض", "moderate": "متوسط", "high": "مرتفع"},
 }
 
 #: Labels for accessibility fields per language.
@@ -180,6 +231,16 @@ _FIELD_LABELS: dict[str, dict[str, str]] = {
         "elevators": "Ascenseurs",
         "accessible_restrooms": "Toilettes accessibles",
         "quiet_route_hint": "Itinéraire calme",
+    },
+    "ar": {
+        "gates": "البوابات المتاحة",
+        "accessible_seating": "المقاعد",
+        "sensory_room": "الدعم الحسي",
+        "assistive_listening": "أجهزة الاستماع المساعدة",
+        "vision_support": "دعم البصر",
+        "elevators": "المصاعد",
+        "accessible_restrooms": "دورات المياه المتاحة",
+        "quiet_route_hint": "المسار الهادئ",
     },
 }
 
@@ -326,6 +387,47 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             "{types}."
         ),
     },
+    "ar": {
+        "greeting": (
+            "مرحباً. أنا AccessMate، مساعدك لإمكانية الوصول في كأس العالم "
+            "FIFA 2026. يمكنك أن تسألني عن البوابات المتاحة، والمقاعد، والغرف "
+            "الحسية، والماء، أو مواعيد المباريات."
+        ),
+        "help": (
+            "يمكنني المساعدة في خدمات إمكانية الوصول، والبوابات والمسارات، "
+            "والطعام والماء، وجدول المباريات. جرّب أن تسأل: أي بوابة متاحة "
+            "للكرسي المتحرك؟"
+        ),
+        "pick_venue": (
+            "من فضلك اختر ملعباً أولاً حتى أتمكن من إعطائك معلومات دقيقة. "
+            "على سبيل المثال: {examples}."
+        ),
+        "unverified": (
+            "يرجى الملاحظة: هذه التفاصيل لم يتم التحقق منها بعد مع الملعب."
+        ),
+        "acc_intro": "إمكانية الوصول في {venue}.",
+        "nursing_room": "نعم. يوجد في {venue} غرفة رضاعة. الموقع: {value}.",
+        "first_aid": "الإسعافات الأولية في {venue}: {value}.",
+        "prayer_room": "مكان الصلاة في {venue}: {value}.",
+        "food_water": (
+            "الماء في {venue}: {water}. تتوفر أكشاك الطعام في جميع الممرات. "
+            "يمكن للموظفين إرشادك إلى المنافذ المتاحة."
+        ),
+        "navigation": (
+            "المدخل الموصى به في {venue}: {gate}. {notes}. الازدحام الحالي "
+            "{level} (بيانات محاكاة). نصيحة: {hint}"
+        ),
+        "outage": "تحذير: المصعد القريب من {gate} خارج الخدمة.",
+        "schedule_opening": "يستضيف {venue} مباراة الافتتاح في {date}.",
+        "schedule_final": "يستضيف {venue} المباراة النهائية في {date}.",
+        "schedule_general": (
+            "تقام مباراة الافتتاح في {open_date} في {open_venue}. وتقام "
+            "المباراة النهائية في {final_date} في {final_venue}."
+        ),
+        "tickets": (
+            "تقدم FIFA ثلاثة أنواع من تذاكر إمكانية الوصول: {types}."
+        ),
+    },
 }
 
 def _normalize(text: str) -> str:
@@ -334,9 +436,26 @@ def _normalize(text: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
+#: Arabic single-letter proclitics (wa/fa/bi/ka/li = and/then/with/like/for)
+#: attach directly to the following word, so a plain word boundary misses them
+#: (e.g. "بالتوحد" = with-the-autism). Allowing a short leading cluster lets the
+#: keyword "التوحد"/"توحد" still match. The class holds only Arabic letters, so
+#: it consumes nothing in en/es/fr text and leaves those matches unchanged.
+_AR_PROCLITICS = "وفبكل"
+
+
 def _contains(normalized: str, keyword: str) -> bool:
-    """Whole-word (or whole-phrase) match against the normalized message."""
-    return re.search(rf"\b{re.escape(keyword)}\b", normalized) is not None
+    """Whole-word (or whole-phrase) match against the normalized message.
+
+    The keyword is normalized with the same pipeline as the message so keyword
+    tables can be authored in natural orthography. This matters for Arabic,
+    where NFKD folds hamza-carrying letters (``أ إ آ`` -> ``ا``, ``ئ`` -> ``ي``)
+    and strips diacritics — a raw keyword like ``النهائي`` would otherwise never
+    match its own normalized form. It is a no-op for the already-plain en/es/fr
+    keywords.
+    """
+    kw = re.escape(_normalize(keyword))
+    return re.search(rf"\b[{_AR_PROCLITICS}]{{0,2}}{kw}\b", normalized) is not None
 
 
 def _detect_intent(normalized: str) -> tuple[str, str | None]:
