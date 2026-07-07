@@ -19,12 +19,16 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+if TYPE_CHECKING:  # optional dependency, imported lazily in _build_rate_limiter
+    import redis
 
 from app import assistant, data
 from app.schemas import (
@@ -146,7 +150,7 @@ class RedisTokenBucketLimiter:
 
     def __init__(
         self,
-        client,
+        client: "redis.Redis",
         capacity: int,
         refill_seconds: float,
         namespace: str = "accessmate:rl:",
@@ -174,7 +178,7 @@ class RedisTokenBucketLimiter:
             self._client.delete(*keys)
 
 
-def _build_rate_limiter():
+def _build_rate_limiter() -> TokenBucketLimiter | RedisTokenBucketLimiter:
     """Choose the rate limiter for this process.
 
     Uses Redis when ``REDIS_URL`` is set and reachable so the limit holds across
@@ -212,7 +216,9 @@ app.state.rate_limiter = rate_limiter
 
 
 @app.middleware("http")
-async def add_security_headers(request: Request, call_next):
+async def add_security_headers(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Attach strict security headers to every response."""
     response = await call_next(request)
     for header, value in _SECURITY_HEADERS.items():
@@ -324,7 +330,7 @@ def chat_stream(
     )
     venue_id = body.profile.venue_id
 
-    def _frames():
+    def _frames() -> Iterator[str]:
         try:
             for kind, payload in events:
                 if kind == "meta":

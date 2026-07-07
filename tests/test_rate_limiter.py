@@ -163,6 +163,17 @@ def test_redis_limiter_namespaces_keys_and_reset_is_scoped():
     assert not any(k.startswith("accessmate:rl:") for k in fake.store)
 
 
+def test_redis_reset_with_no_keys_never_calls_delete():
+    # Redis DELETE with zero keys is an error, so reset() must skip the call
+    # entirely when nothing matches the namespace.
+    fake = _FakeRedis()
+    calls = []
+    fake.delete = lambda *keys: calls.append(keys)
+    limiter = RedisTokenBucketLimiter(fake, RATE_LIMIT_PER_MIN, 60.0)
+    limiter.reset()
+    assert calls == []
+
+
 # ---------------------------------------------------- startup selection
 
 def test_build_rate_limiter_defaults_to_in_memory(monkeypatch):

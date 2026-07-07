@@ -157,6 +157,27 @@ def test_get_live_status_elevator_outage_keyed_to_gate_name():
     assert status["quiet_entrance"] != outage["gate"]
 
 
+def test_get_live_status_without_accessible_gates_degrades_cleanly(monkeypatch):
+    # Defensive path for a (hypothetical) venue with no accessible gate: the
+    # outage cannot be pinned to a gate and no quiet entrance exists, so both
+    # degrade to None rather than raising.
+    fake_venue = {
+        "id": "no-access-venue",
+        "accessibility": {
+            "gates": [
+                {"name": "Gate 1", "accessible": False, "notes": ""},
+                {"name": "Gate 2", "accessible": False, "notes": ""},
+            ]
+        },
+    }
+    monkeypatch.setattr(tools.data, "get_venue", lambda venue_id: fake_venue)
+    # Hour 0 makes this venue id's seed roll an elevator outage (see the seed
+    # scheme in get_live_status), exercising the empty-accessible-names guard.
+    status = tools.get_live_status("no-access-venue", hour=0)
+    assert status["elevator_outage"] is None
+    assert status["quiet_entrance"] is None
+
+
 # ---------------------------------------------------------------- plan_visit
 
 def test_plan_visit_structured_steps():
@@ -200,6 +221,12 @@ def test_plan_visit_invalid_needs_fall_back_with_note():
     plan = plan_visit(VALID, ["flying"], hour=13)
     assert plan["needs"] == ["general"]
     assert "note" in plan
+
+
+def test_plan_visit_deduplicates_repeated_needs():
+    plan = plan_visit(VALID, ["mobility", "mobility"], hour=13)
+    assert plan["needs"] == ["mobility"]
+    assert "note" not in plan  # duplicates are not "unknown" needs
 
 
 def test_plan_visit_accepts_needs_as_string_and_defaults():

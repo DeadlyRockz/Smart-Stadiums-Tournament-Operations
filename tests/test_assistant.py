@@ -250,6 +250,44 @@ def test_no_api_key_goes_straight_to_offline(monkeypatch):
     assert reply.text
 
 
+def test_gemini_client_is_constructed_once_and_reused(monkeypatch):
+    _with_key(monkeypatch)
+    constructed = []
+
+    def _factory(*a, **k):
+        client = _FakeClient([_FakeResponse(text="one"), _FakeResponse(text="two")])
+        constructed.append(client)
+        return client
+
+    monkeypatch.setattr("app.assistant.genai.Client", _factory)
+
+    assert assistant.answer("first", profile={"language": "en"}).text == "one"
+    assert assistant.answer("second", profile={"language": "en"}).text == "two"
+    assert len(constructed) == 1  # cached client reused; no per-request rebuild
+
+
+def test_tool_loop_stops_at_iteration_cap(monkeypatch):
+    _with_key(monkeypatch)
+    model_turn = types.Content(role="model", parts=[types.Part(text="loop")])
+    # Every scripted turn requests another tool call; the loop must stop at the
+    # cap instead of spinning forever, then decline (the last turn had no text).
+    responses = [
+        _FakeResponse(
+            function_calls=[_FakeCall("get_venue_info", {"venue_id": VENUE})],
+            model_turn=model_turn,
+        )
+        for _ in range(assistant._MAX_TOOL_ITERATIONS)
+    ]
+    client = _FakeClient(responses)
+    _patch_client(monkeypatch, client)
+
+    reply = assistant.answer("loop forever", profile={"language": "en"})
+
+    assert len(client.contents_snapshots) == assistant._MAX_TOOL_ITERATIONS
+    assert len(reply.tool_calls_made) == assistant._MAX_TOOL_ITERATIONS
+    assert reply.text == assistant._DECLINE["en"]
+
+
 def test_history_round_trips_as_alternating_turns(monkeypatch):
     _with_key(monkeypatch)
     client = _FakeClient([_FakeResponse(text="ok")])

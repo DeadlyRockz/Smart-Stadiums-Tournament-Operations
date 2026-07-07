@@ -137,6 +137,25 @@ def test_server_error_before_any_text_falls_back_offline(monkeypatch):
     assert events[0] == ("meta", "offline")
 
 
+def test_streamed_tool_loop_stops_at_iteration_cap(
+    monkeypatch, patch_gemini_stream, call_chunk
+):
+    _with_key(monkeypatch)
+    # Every scripted turn requests another tool call; the streamed loop must
+    # stop at the cap and yield the decline (no visible text was produced).
+    turns = [
+        [call_chunk("get_venue_info", {"venue_id": VENUE})]
+        for _ in range(assistant._MAX_TOOL_ITERATIONS)
+    ]
+    client = patch_gemini_stream(turns)
+
+    events = list(assistant.answer_stream("loop forever", {"language": "en"}))
+
+    assert len(client.contents_snapshots) == assistant._MAX_TOOL_ITERATIONS
+    assert events[0] == ("meta", "live")
+    assert events[-1] == ("delta", assistant._DECLINE["en"])
+
+
 def test_stream_400_client_error_is_reraised(monkeypatch):
     _with_key(monkeypatch)
     from google.genai import errors

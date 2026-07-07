@@ -52,6 +52,7 @@ allowed-confusables = ["ا", "أ", "إ", "آ", "ئ", "ي", "و", "ه"]
 
 [tool.coverage.run]
 source = ["app"]
+branch = true
 
 [tool.coverage.report]
 show_missing = true

@@ -165,7 +165,8 @@ python -m ruff check app tests            # lint: zero findings
 python -m coverage run -m pytest && python -m coverage report  # 100% of app/
 ```
 
-The suite (in `tests/`) covers **100% of every line in `app/`**: the data layer
+The suite (in `tests/`) covers **100% of `app/` — every line and every
+branch**: the data layer
 (including venue search), both engines (Arabic routing, clitic handling,
 localized templates, profile-need fallbacks, outage warnings), the tool
 dispatcher (valid/invalid venues, determinism of the simulated feed, defensive
@@ -238,7 +239,7 @@ push, failing if coverage drops below 100%.
 | **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions; typed; docstrings; `ruff` lint passes clean (config in `pyproject.toml`); CI enforces lint + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
 | **Security** | Section 6 — no secrets, strict CSP + headers, XSS-safe rendering, input caps, rate limiting, prompt-injection hygiene, key never leaked. |
 | **Efficiency** | Dataset loaded once and cached (`lru_cache`); stateless requests; frozen system prompt for a stable cache prefix; tools return compact dicts; offline mode avoids any network call. |
-| **Testing** | Section 5 — 144 tests, **100% line coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |
+| **Testing** | Section 5 — 150 tests, **100% line *and* branch coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |
 | **Accessibility** | Section 7 — WCAG-minded, screen-reader-first UI, plus accessibility *is* the product domain. |
 | **Problem Statement Alignment** | A smart, dynamic stadium assistant that makes **context-driven decisions** (profile + live feed → tailored routes/answers) for a chosen FIFA WC 2026 vertical — exactly the challenge's stated expectations. |
 
