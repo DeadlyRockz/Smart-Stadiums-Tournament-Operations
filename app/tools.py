@@ -1,0 +1,361 @@
+"""Tool functions over the static venue dataset (app.data).
+
+Each public function returns a compact, JSON-serializable dict and never
+raises on bad input: unknown venues and invalid enum values produce friendly
+error payloads or graceful fallbacks. ``execute_tool`` is the dispatcher used
+by both the Gemini function-calling loop and the offline engine.
+
+Results are always freshly built dicts — the shared, lru_cached dataset
+returned by ``app.data`` is never mutated. ``get_live_status`` is a SIMULATED
+operations feed: deterministic pseudo-random output seeded by venue id and
+hour, marked ``"simulated": true``. No network access.
+"""
+
+import json
+import random
+from datetime import datetime, timezone
+from typing import Any
+
+from app import data
+
+JSONDict = dict[str, Any]
+
+VALID_NEEDS: frozenset[str] = frozenset(
+    {"mobility", "vision", "hearing", "sensory", "general"}
+)
+CONGESTION_LEVELS: tuple[str, ...] = ("low", "moderate", "high")
+
+#: Accessibility fields relevant to each declared need.
+_NEED_FIELDS: dict[str, tuple[str, ...]] = {
+    "mobility": ("gates", "elevators", "accessible_seating", "accessible_restrooms"),
+    "vision": ("vision_support",),
+    "hearing": ("assistive_listening",),
+    "sensory": ("sensory_room", "quiet_route_hint"),
+    "general": (
+        "gates",
+        "accessible_seating",
+        "sensory_room",
+        "assistive_listening",
+        "vision_support",
+        "elevators",
+        "accessible_restrooms",
+        "quiet_route_hint",
+    ),
+}
+
+#: Chance (per venue-hour) that the simulated feed reports an elevator outage.
+_ELEVATOR_OUTAGE_PROBABILITY = 0.15
+
+#: Suggested arrival lead time (minutes before kickoff) by gate congestion.
+_ARRIVAL_MINUTES = {"low": 60, "moderate": 75, "high": 90}
+
+
+def _venue_error(venue_id: Any) -> JSONDict:
+    """Friendly error payload for an unknown venue id."""
+    examples = ", ".join(v["id"] for v in data.list_venues()[:3])
+    return {
+        "error": (
+            f"Unknown venue id {venue_id!r}. "
+            f"Use one of the 16 tournament venue ids, for example: {examples}."
+        )
+    }
+
+
+def _copy_gates(venue: data.Venue) -> list[JSONDict]:
+    """Shallow-copy the venue's gate dicts so callers can't mutate cached data."""
+    return [dict(gate) for gate in venue["accessibility"]["gates"]]
+
+
+def _normalize_need(need: Any) -> tuple[str, str | None]:
+    """Return a valid need value plus an optional fallback note."""
+    if isinstance(need, str) and need.strip().lower() in VALID_NEEDS:
+        return need.strip().lower(), None
+    note = (
+        f"Unknown need {need!r}; showing general accessibility information. "
+        f"Valid values: {', '.join(sorted(VALID_NEEDS))}."
+    )
+    return "general", note
+
+
+def _normalize_needs(needs: Any) -> tuple[list[str], str | None]:
+    """Coerce ``needs`` into a list of valid need values (fallback: general)."""
+    if isinstance(needs, str):
+        needs = [needs]
+    if not isinstance(needs, (list, tuple)) or not needs:
+        return ["general"], None
+    valid: list[str] = []
+    invalid: list[Any] = []
+    for raw in needs:
+        need = raw.strip().lower() if isinstance(raw, str) else raw
+        if need in VALID_NEEDS:
+            if need not in valid:
+                valid.append(need)
+        else:
+            invalid.append(raw)
+    note = None
+    if invalid:
+        note = (
+            f"Ignored unknown needs {invalid!r}. "
+            f"Valid values: {', '.join(sorted(VALID_NEEDS))}."
+        )
+    if not valid:
+        valid = ["general"]
+    return valid, note
+
+
+def get_venue_info(venue_id: str) -> JSONDict:
+    """Basic venue facts: names, location, capacity, gates, matchday basics."""
+    venue = data.get_venue(venue_id)
+    if venue is None:
+        return _venue_error(venue_id)
+    tournament = data.load_venues()["tournament"]
+    matchday: JSONDict = {
+        "accessibility_ticket_types": list(
+            tournament["accessibility_tickets"]["types"]
+        ),
+        "companion_tickets": tournament["accessibility_tickets"]["companion_tickets"],
+    }
+    if tournament["openingMatch"]["venueId"] == venue_id:
+        matchday["hosts_opening_match"] = tournament["openingMatch"]["date"]
+    if tournament["final"]["venueId"] == venue_id:
+        matchday["hosts_final"] = tournament["final"]["date"]
+    return {
+        "id": venue["id"],
+        "name": venue["name"],
+        "commercialName": venue["commercialName"],
+        "fifaName": venue["fifaName"],
+        "city": venue["city"],
+        "country": venue["country"],
+        "capacity": venue["capacity"],
+        "capacity_note": "approximate tournament capacity",
+        "gates": _copy_gates(venue),
+        "matchday": matchday,
+    }
+
+
+def find_accessible_services(venue_id: str, need: str = "general") -> JSONDict:
+    """Accessibility services at a venue, filtered by declared need.
+
+    ``need`` must be one of mobility/vision/hearing/sensory/general; anything
+    else falls back to "general" with an explanatory note. The result carries
+    the dataset's ``verified`` flag so answers can caveat unverified data.
+    """
+    venue = data.get_venue(venue_id)
+    if venue is None:
+        return _venue_error(venue_id)
+    need, note = _normalize_need(need)
+    accessibility = venue["accessibility"]
+    services: JSONDict = {
+        field: _copy_gates(venue) if field == "gates" else accessibility[field]
+        for field in _NEED_FIELDS[need]
+    }
+    result: JSONDict = {
+        "venue_id": venue["id"],
+        "venue_name": venue["name"],
+        "need": need,
+        "services": services,
+        "verified": accessibility["verified"],
+    }
+    if note:
+        result["note"] = note
+    return result
+
+
+def _quiet_entrance(
+    gate_congestion: list[JSONDict], outage_gate: str | None
+) -> str | None:
+    """Least congested accessible gate, avoiding an elevator outage if possible."""
+    ranked = sorted(
+        (entry for entry in gate_congestion if entry["accessible"]),
+        key=lambda entry: (
+            entry["gate"] == outage_gate,
+            CONGESTION_LEVELS.index(entry["congestion"]),
+        ),
+    )
+    return ranked[0]["gate"] if ranked else None
+
+
+def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
+    """SIMULATED live operations feed for a venue.
+
+    Deterministic pseudo-random output seeded by venue id + hour: per-gate
+    congestion (low/moderate/high), a possible elevator outage keyed to an
+    accessible gate name, and a quiet-entrance suggestion. ``hour`` defaults
+    to the current UTC hour; pass a fixed value to pin the seed (tests).
+    """
+    venue = data.get_venue(venue_id)
+    if venue is None:
+        return _venue_error(venue_id)
+    if hour is None:
+        hour = datetime.now(timezone.utc).hour
+    else:
+        try:
+            hour = int(hour) % 24
+        except (TypeError, ValueError):
+            hour = datetime.now(timezone.utc).hour
+    rng = random.Random(f"{venue_id}-{hour}")
+    gates = venue["accessibility"]["gates"]
+    gate_congestion = [
+        {
+            "gate": gate["name"],
+            "accessible": gate["accessible"],
+            "congestion": rng.choice(CONGESTION_LEVELS),
+        }
+        for gate in gates
+    ]
+    outage_gate: str | None = None
+    if rng.random() < _ELEVATOR_OUTAGE_PROBABILITY:
+        accessible_names = [g["name"] for g in gates if g["accessible"]]
+        if accessible_names:
+            outage_gate = rng.choice(accessible_names)
+    elevator_outage: JSONDict | None = None
+    if outage_gate is not None:
+        elevator_outage = {
+            "gate": outage_gate,
+            "note": (
+                f"Elevator near {outage_gate} is out of service; "
+                "staff can assist at the other accessible gates."
+            ),
+        }
+    return {
+        "simulated": True,
+        "venue_id": venue["id"],
+        "hour_utc": hour,
+        "gate_congestion": gate_congestion,
+        "elevator_outage": elevator_outage,
+        "quiet_entrance": _quiet_entrance(gate_congestion, outage_gate),
+    }
+
+
+def plan_visit(
+    venue_id: str,
+    needs: list[str] | None = None,
+    language: str = "en",
+    hour: int | None = None,
+) -> JSONDict:
+    """Structured step-by-step arrival plan for a venue visit.
+
+    Combines the simulated live status (recommended quiet accessible gate),
+    arrive-early advice, services en route, and need-specific tips. Returns
+    structured steps, not prose — the LLM/offline layer renders language.
+    """
+    venue = data.get_venue(venue_id)
+    if venue is None:
+        return _venue_error(venue_id)
+    valid_needs, note = _normalize_needs(needs)
+    status = get_live_status(venue_id, hour=hour)
+    accessibility = venue["accessibility"]
+    services = venue["services"]
+
+    gate_name = status["quiet_entrance"]
+    gate = next(
+        (g for g in accessibility["gates"] if g["name"] == gate_name), None
+    )
+    congestion = next(
+        (
+            entry["congestion"]
+            for entry in status["gate_congestion"]
+            if entry["gate"] == gate_name
+        ),
+        "low",
+    )
+    arrive_minutes = _ARRIVAL_MINUTES[congestion]
+    if any(need != "general" for need in valid_needs):
+        arrive_minutes += 15
+
+    steps: list[JSONDict] = [
+        {
+            "step": 1,
+            "action": "enter_via_gate",
+            "gate": gate_name,
+            "gate_notes": gate["notes"] if gate else "",
+            "congestion": congestion,
+            "reason": "least congested accessible gate right now (simulated live data)",
+        },
+        {
+            "step": 2,
+            "action": "arrive_early",
+            "minutes_before_kickoff": arrive_minutes,
+        },
+        {
+            "step": 3,
+            "action": "services_en_route",
+            "water": services["water"],
+            "first_aid": services["first_aid"],
+            "nursing_room": services["nursing_room"],
+        },
+    ]
+    for need in valid_needs:
+        tips = {
+            field: accessibility[field]
+            for field in _NEED_FIELDS[need]
+            if field != "gates"
+        }
+        steps.append(
+            {
+                "step": len(steps) + 1,
+                "action": "need_support",
+                "need": need,
+                "tips": tips,
+            }
+        )
+    if status["elevator_outage"] is not None:
+        steps.append(
+            {
+                "step": len(steps) + 1,
+                "action": "elevator_outage_warning",
+                "gate": status["elevator_outage"]["gate"],
+                "note": status["elevator_outage"]["note"],
+            }
+        )
+
+    result: JSONDict = {
+        "venue_id": venue["id"],
+        "venue_name": venue["name"],
+        "language": language,
+        "needs": valid_needs,
+        "simulated": True,
+        "verified": accessibility["verified"],
+        "steps": steps,
+    }
+    if note:
+        result["note"] = note
+    return result
+
+
+#: Dispatcher registry: tool name -> (function, accepted argument names).
+_TOOL_REGISTRY: dict[str, tuple[Any, tuple[str, ...]]] = {
+    "get_venue_info": (get_venue_info, ("venue_id",)),
+    "find_accessible_services": (find_accessible_services, ("venue_id", "need")),
+    "get_live_status": (get_live_status, ("venue_id", "hour")),
+    "plan_visit": (plan_visit, ("venue_id", "needs", "language", "hour")),
+}
+
+
+def execute_tool(name: str, args: dict[str, Any] | None) -> str:
+    """Dispatch a tool call by name and return the result as a JSON string.
+
+    Never raises: unknown tool names, unknown venues, missing arguments, and
+    unexpected failures all come back as ``{"error": ...}`` JSON strings.
+    Unrecognized argument keys are silently dropped.
+    """
+    if not isinstance(name, str) or name not in _TOOL_REGISTRY:
+        payload: JSONDict = {
+            "error": (
+                f"Unknown tool {name!r}. "
+                f"Available tools: {', '.join(sorted(_TOOL_REGISTRY))}."
+            )
+        }
+        return json.dumps(payload, ensure_ascii=False)
+    func, accepted = _TOOL_REGISTRY[name]
+    if not isinstance(args, dict):
+        args = {}
+    kwargs = {key: value for key, value in args.items() if key in accepted}
+    venue_id = kwargs.get("venue_id")
+    if not isinstance(venue_id, str) or data.get_venue(venue_id) is None:
+        return json.dumps(_venue_error(venue_id), ensure_ascii=False)
+    try:
+        result = func(**kwargs)
+    except Exception as exc:  # defensive: tools should never raise upstream
+        result = {"error": f"Tool {name!r} failed on the given arguments: {exc}"}
+    return json.dumps(result, ensure_ascii=False)
