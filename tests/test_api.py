@@ -119,10 +119,11 @@ def test_healthz_reports_offline_without_key(client):
 
 
 def test_healthz_reports_live_with_key_but_never_echoes_it(client, monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSECRETKEYVALUE")
+    fake_key = "test-fake-key-never-real"  # not a real key format; just a sentinel
+    monkeypatch.setenv("GEMINI_API_KEY", fake_key)
     resp = client.get("/healthz")
     assert resp.json()["llm"] == "live"
-    assert "AIzaSECRETKEYVALUE" not in resp.text  # key never leaked
+    assert fake_key not in resp.text  # key value is never leaked in any response
 
 
 # ---- Security headers ------------------------------------------------------

@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+# Run the suite with `python -m pytest` from the project root.
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # Silence third-party deprecation noise (google-genai, starlette testclient)
+    # so real warnings from our code stay visible.
+    "ignore::DeprecationWarning:google.genai.types",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
