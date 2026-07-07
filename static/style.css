@@ -1,0 +1,337 @@
+/*
+  AccessMate stylesheet.
+  Goals: calm, high-contrast, keyboard-friendly. Works in light and dark
+  colour schemes, honours reduced-motion, and never removes focus outlines
+  without a stronger replacement. All sizing is rem-based.
+
+  Colours are chosen for text contrast >= 4.5:1 against their backgrounds in
+  both themes.
+*/
+
+/* ---- Design tokens: light theme (default) ---- */
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-alt: #eef1f5;
+  --text: #14181f;          /* ~15:1 on --surface */
+  --text-muted: #4a5560;    /* ~7:1 on --surface */
+  --border: #c3cad3;
+  --accent: #0b5c9e;        /* buttons/links: ~5.6:1 on white */
+  --accent-text: #ffffff;
+  --accent-hover: #084a80;
+  --focus: #b8005b;         /* distinct focus ring, ~4.8:1 */
+  --user-bg: #dbe8f6;
+  --user-text: #10202f;     /* high contrast on user bubble */
+  --assistant-bg: #eef1f5;
+  --assistant-text: #14181f;
+  --banner-bg: #fff4d6;
+  --banner-text: #4a3600;   /* >7:1 on banner bg */
+  --banner-border: #d8a800;
+  --error-text: #8a1220;
+
+  --radius: 0.6rem;
+  --gap: 1rem;
+  --maxw: 46rem;
+}
+
+/* ---- Dark theme via system preference ---- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10141a;
+    --surface: #1a2029;
+    --surface-alt: #222a35;
+    --text: #eef2f7;          /* ~14:1 on --surface */
+    --text-muted: #b3bdc9;    /* ~7:1 on --surface */
+    --border: #3a4552;
+    --accent: #4ea3e0;        /* ~6:1 on dark surface */
+    --accent-text: #06121d;
+    --accent-hover: #6fb6e8;
+    --focus: #ff77aa;         /* bright focus ring on dark */
+    --user-bg: #24405c;
+    --user-text: #eaf3fb;
+    --assistant-bg: #222a35;
+    --assistant-text: #eef2f7;
+    --banner-bg: #3a3007;
+    --banner-text: #ffe9a8;
+    --banner-border: #d8a800;
+    --error-text: #ff9aa6;
+  }
+}
+
+/* ---- Base ---- */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Constrain content to a readable column width */
+.app-header,
+.app-main,
+.app-footer {
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+/* ---- Skip link: hidden until focused ---- */
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: -3rem;
+  z-index: 10;
+  background: var(--accent);
+  color: var(--accent-text);
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 0.5rem;
+}
+
+/* ---- Header / footer ---- */
+.app-header {
+  padding-top: 1.5rem;
+  padding-bottom: 0.5rem;
+}
+.app-header h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  letter-spacing: 0.01em;
+}
+.tagline {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+.app-footer {
+  padding-block: 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- Section headings ---- */
+.section-heading {
+  font-size: 1.05rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+/* ---- Offline banner ---- */
+.offline-banner {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--banner-bg);
+  color: var(--banner-text);
+  border: 0.125rem solid var(--banner-border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+.offline-banner[hidden] { display: none; }
+.offline-banner__icon {
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+/* ---- Setup form ---- */
+.setup__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 12rem;
+}
+.field label,
+.field__label,
+.check,
+.needs legend {
+  font-weight: 600;
+}
+
+select,
+.composer__input {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.7rem;
+  min-height: 2.75rem; /* comfortable touch target */
+}
+
+/* Needs checkboxes grouped in a fieldset */
+.needs {
+  margin-top: 1rem;
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem 1rem;
+  background: var(--surface);
+}
+.needs legend {
+  padding: 0 0.4rem;
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 1.2rem;
+  font-weight: 500;
+  min-height: 2.25rem;
+  cursor: pointer;
+}
+.check input {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/* ---- Quick-action chips ---- */
+.quick-actions__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.chip {
+  font: inherit;
+  background: var(--surface);
+  color: var(--accent);
+  border: 0.125rem solid var(--accent);
+  border-radius: 2rem;
+  padding: 0.5rem 1rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+.chip:hover {
+  background: var(--surface-alt);
+}
+
+/* ---- Transcript / messages ---- */
+.transcript {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  min-height: 12rem;
+  max-height: 26rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 0.0625rem solid var(--border);
+  border-radius: var(--radius);
+}
+
+.msg {
+  margin-bottom: 0.85rem;
+  max-width: 90%;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius);
+}
+.msg:last-child { margin-bottom: 0; }
+
+/* Author label — meaning is carried by text ("You:"/"AccessMate:") not colour */
+.msg__author {
+  display: block;
+  font-weight: 700;
+  font-size: 0.8rem;
+  margin-bottom: 0.2rem;
+}
+.msg__text { white-space: pre-wrap; }
+
+/* User messages: aligned right, distinct background */
+.msg--user {
+  background: var(--user-bg);
+  color: var(--user-text);
+  margin-left: auto;
+}
+/* Assistant messages: aligned left, different background */
+.msg--assistant {
+  background: var(--assistant-bg);
+  color: var(--assistant-text);
+  margin-right: auto;
+}
+/* Status / error messages span full width */
+.msg--status {
+  background: transparent;
+  color: var(--error-text);
+  font-weight: 600;
+  max-width: 100%;
+  padding-left: 0;
+}
+
+/* Typing indicator while awaiting a reply */
+.msg--pending .msg__text::after {
+  content: "…";
+}
+
+/* ---- Composer ---- */
+.composer {
+  margin-top: 1rem;
+}
+.composer__row {
+  display: flex;
+  gap: 0.6rem;
+}
+.composer__input {
+  flex: 1 1 auto;
+}
+.composer__send {
+  font: inherit;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.6rem 1.4rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+.composer__send:hover { background: var(--accent-hover); }
+.composer__send:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.composer__hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ---- Focus: visible on ALL interactive elements ---- */
+:focus-visible {
+  outline: 0.1875rem solid var(--focus);
+  outline-offset: 0.15rem;
+}
+/* Keep a fallback outline for browsers without :focus-visible */
+a:focus,
+button:focus,
+select:focus,
+input:focus {
+  outline: 0.1875rem solid var(--focus);
+  outline-offset: 0.15rem;
+}
+/* Where :focus-visible is supported, only show ring for keyboard users */
+a:focus:not(:focus-visible),
+button:focus:not(:focus-visible),
+select:focus:not(:focus-visible),
+input:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---- Motion: respect reduced-motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
