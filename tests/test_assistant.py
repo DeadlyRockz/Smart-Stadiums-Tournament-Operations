@@ -135,6 +135,22 @@ def test_client_error_401_falls_back_to_offline(monkeypatch):
     assert reply.text  # offline engine produced a real answer
 
 
+def test_model_not_found_404_falls_back_to_offline(monkeypatch):
+    _with_key(monkeypatch)
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content(*, model, contents, config):
+                # e.g. the configured model id is not available to this key.
+                raise errors.ClientError(404, {"error": {"message": "model not found"}})
+
+    _patch_client(monkeypatch, _RaisingClient())
+    reply = assistant.answer("hello", profile={"language": "en"})
+    assert reply.mode == "offline"
+    assert reply.text  # degrades instead of surfacing a 500
+
+
 def test_rate_limit_429_falls_back_to_offline(monkeypatch):
     _with_key(monkeypatch)
 

@@ -93,20 +93,6 @@ function appendPending() {
   return wrap;
 }
 
-/**
- * Replace a pending bubble's text with the final reply (or repurpose it).
- * @param {HTMLElement} wrap
- * @param {string} text
- */
-function resolvePending(wrap, text) {
-  wrap.classList.remove("msg--pending");
-  const body = wrap.querySelector(".msg__text");
-  if (body) {
-    body.textContent = text;
-  }
-  els.transcript.scrollTop = els.transcript.scrollHeight;
-}
-
 // =====================================================================
 // History management
 // =====================================================================
@@ -185,7 +171,7 @@ async function loadVenues() {
 
 async function checkHealth() {
   try {
-    const res = await fetch("/healthz", { headers: { Accept: "application/json" } });
+    const res = await fetch("/api/healthz", { headers: { Accept: "application/json" } });
     if (!res.ok) {
       return;
     }
@@ -218,7 +204,13 @@ function readProfile() {
 let inFlight = false;
 
 /**
- * Send a message to the backend and render the reply.
+ * Send a message to the backend and render the reply as it streams in.
+ *
+ * The reply arrives as newline-delimited JSON frames from /api/chat/stream:
+ *   {"type":"meta","mode":...}  then  {"type":"delta","text":...} pieces.
+ * Deltas are typed into a bubble that is aria-hidden during streaming, so a
+ * screen reader is NOT spammed with each fragment; on completion the streaming
+ * bubble is swapped for a single, final bubble that is announced exactly once.
  * @param {string} rawText
  */
 async function sendMessage(rawText) {
@@ -239,7 +231,13 @@ async function sendMessage(rawText) {
   inFlight = true;
   els.send.disabled = true;
   els.input.value = "";
+
+  // The streaming bubble is hidden from assistive tech: partial tokens must not
+  // be announced one-by-one in the aria-live log. The completed reply is added
+  // as a fresh (announced) bubble once the stream finishes.
   const pending = appendPending();
+  pending.setAttribute("aria-hidden", "true");
+  const pendingBody = pending.querySelector(".msg__text");
 
   const payload = {
     message: text,
@@ -247,36 +245,88 @@ async function sendMessage(rawText) {
     history: history.slice(0, HISTORY_LIMIT),
   };
 
+  let replyText = "";
+  let started = false; // has the first delta arrived (bubble left pending state)?
+  let errored = false;
+
+  const handleFrame = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    let frame;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch (e) {
+      return; // ignore a malformed frame rather than break the whole stream
+    }
+    if (frame.type === "meta") {
+      setOfflineBanner(frame.mode === "offline");
+    } else if (frame.type === "delta" && typeof frame.text === "string") {
+      if (!started) {
+        started = true;
+        pending.classList.remove("msg--pending");
+      }
+      replyText += frame.text;
+      if (pendingBody) {
+        pendingBody.textContent = replyText;
+      }
+      els.transcript.scrollTop = els.transcript.scrollHeight;
+    } else if (frame.type === "error") {
+      errored = true;
+    }
+  };
+
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json",
+        Accept: "application/x-ndjson",
       },
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
       throw new Error("HTTP " + res.status);
     }
 
-    const data = await res.json();
-    const reply = typeof data.reply === "string" ? data.reply : "";
-
-    resolvePending(pending, reply || "(No reply received.)");
-    if (reply) {
-      pushHistory("assistant", reply);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        handleFrame(buffer.slice(0, nl));
+        buffer = buffer.slice(nl + 1);
+      }
     }
-    setOfflineBanner(data.mode === "offline");
+    handleFrame(buffer); // final line, if not newline-terminated
+
+    if (errored && !replyText) {
+      throw new Error("stream error");
+    }
+
+    // Swap the (aria-hidden) streaming bubble for a final, announced bubble so
+    // screen readers hear the complete reply exactly once.
+    pending.remove();
+    const finalText = replyText || "(No reply received.)";
+    appendMessage("assistant", finalText);
+    if (replyText) {
+      pushHistory("assistant", replyText);
+    }
   } catch (err) {
     // Polite, non-technical inline error — never a raw stack trace.
-    resolvePending(
-      pending,
+    pending.remove();
+    appendMessage(
+      "status",
       "Sorry, I could not reach the assistant just now. Please check your connection and try again."
     );
-    pending.classList.add("msg--status");
-    pending.setAttribute("role", "status");
   } finally {
     inFlight = false;
     els.send.disabled = false;
@@ -309,11 +359,28 @@ function wireEvents() {
 }
 
 // =====================================================================
+// Welcome message
+// =====================================================================
+
+// Static, first-load greeting. Rendered via the same textContent-only path as
+// every other bubble (no markup), and deliberately NOT pushed into `history`,
+// so the API contract (only real user/assistant turns) is unchanged.
+const WELCOME_TEXT =
+  "Hello! I'm AccessMate, your accessibility copilot for the FIFA World Cup 2026. " +
+  "Pick a stadium and your access needs, or just ask me anything — wheelchair " +
+  "routes, sensory rooms, assistive listening, and live gate status.";
+
+function renderWelcome() {
+  appendMessage("assistant", WELCOME_TEXT);
+}
+
+// =====================================================================
 // Init
 // =====================================================================
 
 function init() {
   applyLanguage();
+  renderWelcome();
   wireEvents();
   loadVenues();
   checkHealth();

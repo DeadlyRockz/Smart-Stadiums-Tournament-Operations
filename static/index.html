@@ -1,3 +1,6 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
 <!--
   AccessMate — accessibility-first stadium copilot (FIFA World Cup 2026).
   Single-page, dependency-free chat UI. All dynamic text is rendered as text
@@ -5,18 +8,30 @@
   strict Content-Security-Policy (default-src 'self') stays intact.
 -->
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="AccessMate: an accessibility-first assistant for FIFA World Cup 2026 stadiums.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0b5c9e" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0f15" media="(prefers-color-scheme: dark)">
 <title>AccessMate — Accessible Stadium Copilot</title>
+<!-- Inline SVG favicon (data: URI, allowed by img-src 'self' data:); avoids a /favicon.ico request. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2214%22%20fill=%22%230b5c9e%22/%3E%3Ctext%20x=%2232%22%20y=%2247%22%20font-size=%2240%22%20text-anchor=%22middle%22%20fill=%22%23ffffff%22%3E%E2%99%BF%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/app.js" defer></script>
+</head>
 
+<body>
 <!-- Skip link: first tab stop, lets keyboard/screen-reader users jump to input -->
 <a class="skip-link" href="#message-input">Skip to message input</a>
 
 <header class="app-header">
-  <h1>AccessMate</h1>
-  <p class="tagline">Your accessibility-first stadium copilot for the FIFA World Cup 2026.</p>
+  <div class="app-header__inner">
+    <span class="brand__mark" aria-hidden="true">&#9855;</span>
+    <div class="brand__text">
+      <h1>AccessMate</h1>
+      <p class="tagline">Accessibility-first stadium copilot &middot; FIFA World Cup 2026</p>
+    </div>
+  </div>
 </header>
 
 <main class="app-main">
@@ -30,86 +45,107 @@
     <span>Offline demo mode — running without a live AI key. Answers come from a built-in guide.</span>
   </div>
 
-  <!-- Setup: choose a stadium, a language, and any access needs. -->
-  <section class="setup" aria-labelledby="setup-heading">
-    <h2 id="setup-heading" class="section-heading">Set up your assistant</h2>
+  <div class="layout">
+    <aside class="sidebar">
+      <!-- Setup: choose a stadium, a language, and any access needs. -->
+      <section class="card setup" aria-labelledby="setup-heading">
+        <h2 id="setup-heading" class="section-heading">Set up your assistant</h2>
 
-    <div class="setup__row">
-      <div class="field">
-        <label for="venue-select">Stadium</label>
-        <select id="venue-select" name="venue">
-          <option value="">Choose a stadium</option>
-        </select>
+        <div class="setup__row">
+          <div class="field">
+            <label for="venue-select">Stadium</label>
+            <div class="select-wrap">
+              <select id="venue-select" name="venue">
+                <option value="">Choose a stadium</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="language-select">Language</label>
+            <div class="select-wrap">
+              <select id="language-select" name="language">
+                <option value="en">English</option>
+                <option value="es">Espa&ntilde;ol</option>
+                <option value="fr">Fran&ccedil;ais</option>
+                <option value="ar">&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <fieldset class="needs">
+          <legend>Accessibility needs (optional)</legend>
+          <div class="needs__grid">
+            <label class="check"><input type="checkbox" name="needs" value="mobility"><span>Mobility</span></label>
+            <label class="check"><input type="checkbox" name="needs" value="vision"><span>Vision</span></label>
+            <label class="check"><input type="checkbox" name="needs" value="hearing"><span>Hearing</span></label>
+            <label class="check"><input type="checkbox" name="needs" value="sensory"><span>Sensory</span></label>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- Quick actions: real buttons that fill and send a common question. -->
+      <section class="card quick-actions" aria-labelledby="quick-heading">
+        <h2 id="quick-heading" class="section-heading">Quick questions</h2>
+        <div class="quick-actions__list">
+          <button type="button" class="chip" data-prompt="What is the accessible route to my seat?">Accessible route to my seat</button>
+          <button type="button" class="chip" data-prompt="Where is the quiet entrance?">Quiet entrance</button>
+          <button type="button" class="chip" data-prompt="Where is the nearest accessible restroom?">Nearest accessible restroom</button>
+        </div>
+      </section>
+    </aside>
+
+    <!--
+      Chat card. The transcript is a role="log" aria-live="polite" region so
+      screen readers announce each new message; aria-atomic="false" reads only
+      the newly appended node. Messages are appended as child nodes by app.js.
+    -->
+    <section class="card chat" aria-labelledby="transcript-heading">
+      <div class="chat__head">
+        <h2 id="transcript-heading" class="section-heading">Conversation</h2>
+        <span class="chat__status" aria-hidden="true"><span class="chat__dot"></span>Assistant ready</span>
       </div>
 
-      <div class="field">
-        <label for="language-select">Language</label>
-        <select id="language-select" name="language">
-          <option value="en">English</option>
-          <option value="es">Espa&ntilde;ol</option>
-          <option value="fr">Fran&ccedil;ais</option>
-          <option value="ar">&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;</option>
-        </select>
-      </div>
-    </div>
+      <div
+        id="transcript"
+        class="transcript"
+        role="log"
+        aria-live="polite"
+        aria-atomic="false"
+        aria-labelledby="transcript-heading"
+        lang="en"
+        dir="ltr"
+        tabindex="0"
+      ></div>
 
-    <fieldset class="needs">
-      <legend>Accessibility needs (optional)</legend>
-      <label class="check"><input type="checkbox" name="needs" value="mobility"> Mobility</label>
-      <label class="check"><input type="checkbox" name="needs" value="vision"> Vision</label>
-      <label class="check"><input type="checkbox" name="needs" value="hearing"> Hearing</label>
-      <label class="check"><input type="checkbox" name="needs" value="sensory"> Sensory</label>
-    </fieldset>
-  </section>
-
-  <!-- Quick actions: real buttons that fill and send a common question. -->
-  <section class="quick-actions" aria-labelledby="quick-heading">
-    <h2 id="quick-heading" class="section-heading">Quick questions</h2>
-    <div class="quick-actions__list">
-      <button type="button" class="chip" data-prompt="What is the accessible route to my seat?">Accessible route to my seat</button>
-      <button type="button" class="chip" data-prompt="Where is the quiet entrance?">Quiet entrance</button>
-      <button type="button" class="chip" data-prompt="Where is the nearest accessible restroom?">Nearest accessible restroom</button>
-    </div>
-  </section>
-
-  <!--
-    Chat transcript. role="log" + aria-live="polite" announces new messages;
-    aria-atomic="false" so only the newly appended node is read, not the whole
-    history. Messages are appended as child nodes by app.js.
-  -->
-  <h2 id="transcript-heading" class="section-heading">Conversation</h2>
-  <div
-    id="transcript"
-    class="transcript"
-    role="log"
-    aria-live="polite"
-    aria-atomic="false"
-    aria-labelledby="transcript-heading"
-    lang="en"
-    dir="ltr"
-    tabindex="0"
-  ></div>
-
-  <!-- Message composer. Enter sends; Send button disables while in flight. -->
-  <form id="chat-form" class="composer">
-    <label for="message-input" class="field__label">Your message</label>
-    <div class="composer__row">
-      <input
-        id="message-input"
-        class="composer__input"
-        type="text"
-        name="message"
-        autocomplete="off"
-        maxlength="2000"
-        placeholder="Ask about access, routes, services…"
-        aria-describedby="composer-hint"
-      >
-      <button id="send-button" type="submit" class="composer__send">Send</button>
-    </div>
-    <p id="composer-hint" class="composer__hint">Press Enter to send.</p>
-  </form>
+      <!-- Message composer. Enter sends; Send button disables while in flight. -->
+      <form id="chat-form" class="composer">
+        <label for="message-input" class="composer__label">Your message</label>
+        <div class="composer__row">
+          <input
+            id="message-input"
+            class="composer__input"
+            type="text"
+            name="message"
+            autocomplete="off"
+            maxlength="2000"
+            placeholder="Ask about access, routes, services…"
+            aria-describedby="composer-hint"
+          >
+          <button id="send-button" type="submit" class="composer__send">
+            <span class="composer__send-icon" aria-hidden="true">&#10148;</span>
+            <span class="composer__send-label">Send</span>
+          </button>
+        </div>
+        <p id="composer-hint" class="composer__hint">Press Enter to send.</p>
+      </form>
+    </section>
+  </div>
 </main>
 
 <footer class="app-footer">
   <p>AccessMate is a demonstration assistant. In an emergency, contact stadium staff or local emergency services.</p>
 </footer>
+</body>
+</html>

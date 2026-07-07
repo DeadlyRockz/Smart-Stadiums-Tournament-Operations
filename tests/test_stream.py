@@ -1,0 +1,190 @@
+"""Tests for the streaming chat path (assistant.answer_stream + /api/chat/stream).
+
+The google-genai client is mocked with a fake streaming client (from conftest);
+no network or key is touched. Covers the streamed function-calling loop, the
+blocked-response decline, offline fallback, and the NDJSON endpoint contract.
+"""
+
+import json
+
+from app import assistant
+
+VENUE = "new-york-new-jersey"
+
+
+def _with_key(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+
+def _no_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+
+# --- assistant.answer_stream --------------------------------------------------
+
+def test_offline_stream_without_key(monkeypatch):
+    _no_key(monkeypatch)
+    events = list(
+        assistant.answer_stream("wheelchair access?", {"venue_id": VENUE, "language": "en"})
+    )
+    assert events[0] == ("meta", "offline")
+    assert events[1][0] == "delta" and events[1][1]  # a real offline answer
+    assert len(events) == 2
+
+
+def test_live_direct_text_streams_incrementally(monkeypatch, patch_gemini_stream, text_chunk):
+    _with_key(monkeypatch)
+    patch_gemini_stream([[text_chunk("The opening "), text_chunk("match is 2026-06-11.")]])
+
+    events = list(assistant.answer_stream("when is kickoff?", {"language": "en"}))
+
+    assert events[0] == ("meta", "live")
+    deltas = [payload for kind, payload in events if kind == "delta"]
+    assert len(deltas) == 2  # streamed in pieces, not one blob
+    assert "".join(deltas) == "The opening match is 2026-06-11."
+
+
+def test_live_tool_round_then_streamed_answer(
+    monkeypatch, patch_gemini_stream, text_chunk, call_chunk
+):
+    _with_key(monkeypatch)
+    client = patch_gemini_stream(
+        [
+            [call_chunk("get_venue_info", {"venue_id": VENUE})],  # turn 1: tool call
+            [text_chunk("MetLife Stadium "), text_chunk("hosts the final.")],  # turn 2: answer
+        ]
+    )
+
+    events = list(
+        assistant.answer_stream("tell me about MetLife", {"venue_id": VENUE, "language": "en"})
+    )
+
+    assert events[0] == ("meta", "live")
+    assert "".join(p for k, p in events if k == "delta") == "MetLife Stadium hosts the final."
+
+    # The second request's contents mirror the non-streaming loop:
+    # [user_turn, model_turn(rebuilt from streamed parts), function-responses].
+    second = client.contents_snapshots[1]
+    assert len(second) == 3
+    assert second[1].role == "model"  # verbatim tool-call turn preserved
+    assert second[2].role == "user"
+    assert len(second[2].parts) == 1  # one function response for the one call
+
+
+def test_live_blocked_no_text_yields_decline(monkeypatch, patch_gemini_stream, empty_chunk):
+    _with_key(monkeypatch)
+    patch_gemini_stream([[empty_chunk()]])  # no text, no calls (blocked / SAFETY)
+
+    events = list(assistant.answer_stream("something blocked", {"language": "es"}))
+
+    assert events[0] == ("meta", "live")
+    assert events[-1] == ("delta", assistant._DECLINE["es"])  # localized decline
+
+
+def test_auth_error_before_any_text_falls_back_offline(monkeypatch):
+    _with_key(monkeypatch)
+    from google.genai import errors
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content_stream(*, model, contents, config):
+                raise errors.ClientError(401, {"error": {"message": "bad key"}})
+
+    monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _RaisingClient())
+
+    events = list(
+        assistant.answer_stream("hi", {"venue_id": VENUE, "language": "en"})
+    )
+    assert events[0] == ("meta", "offline")
+    assert events[1][0] == "delta" and events[1][1]
+
+
+def test_model_not_found_404_before_any_text_falls_back_offline(monkeypatch):
+    _with_key(monkeypatch)
+    from google.genai import errors
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content_stream(*, model, contents, config):
+                raise errors.ClientError(404, {"error": {"message": "model not found"}})
+
+    monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _RaisingClient())
+
+    events = list(assistant.answer_stream("hi", {"language": "en"}))
+    assert events[0] == ("meta", "offline")
+    assert events[1][0] == "delta" and events[1][1]
+
+
+def test_server_error_before_any_text_falls_back_offline(monkeypatch):
+    _with_key(monkeypatch)
+    from google.genai import errors
+
+    class _RaisingClient:
+        class models:
+            @staticmethod
+            def generate_content_stream(*, model, contents, config):
+                raise errors.ServerError(503, {"error": {"message": "unavailable"}})
+
+    monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _RaisingClient())
+
+    events = list(assistant.answer_stream("hi", {"language": "en"}))
+    assert events[0] == ("meta", "offline")
+
+
+# --- /api/chat/stream endpoint ------------------------------------------------
+
+def test_endpoint_streams_ndjson_offline(client, monkeypatch):
+    _no_key(monkeypatch)
+    res = client.post(
+        "/api/chat/stream",
+        json={
+            "message": "wheelchair access?",
+            "profile": {"venue_id": VENUE, "language": "en", "needs": []},
+            "history": [],
+        },
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/x-ndjson")
+    # Security headers still applied to a streaming response by the middleware.
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+    assert "default-src 'self'" in res.headers["Content-Security-Policy"]
+
+    frames = [json.loads(line) for line in res.text.splitlines() if line.strip()]
+    assert frames[0] == {"type": "meta", "mode": "offline", "venue_id": VENUE}
+    assert any(f["type"] == "delta" and f["text"] for f in frames)
+
+
+def test_endpoint_streams_live_deltas(client, monkeypatch, patch_gemini_stream, text_chunk):
+    _with_key(monkeypatch)
+    patch_gemini_stream([[text_chunk("Gate A "), text_chunk("is quietest.")]])
+
+    res = client.post(
+        "/api/chat/stream",
+        json={
+            "message": "quietest gate?",
+            "profile": {"venue_id": VENUE, "language": "en", "needs": []},
+            "history": [],
+        },
+    )
+    assert res.status_code == 200
+    frames = [json.loads(line) for line in res.text.splitlines() if line.strip()]
+    assert frames[0]["type"] == "meta" and frames[0]["mode"] == "live"
+    text = "".join(f["text"] for f in frames if f["type"] == "delta")
+    assert text == "Gate A is quietest."
+
+
+def test_endpoint_rate_limited_returns_429(client, monkeypatch):
+    _no_key(monkeypatch)
+    payload = {
+        "message": "hi",
+        "profile": {"venue_id": VENUE, "language": "en", "needs": []},
+        "history": [],
+    }
+    # The streaming endpoint shares the same per-IP limiter; exhaust the bucket
+    # (20/min) and the next request must be rejected with 429.
+    statuses = {client.post("/api/chat/stream", json=payload).status_code for _ in range(50)}
+    assert 429 in statuses

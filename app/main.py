@@ -14,6 +14,7 @@ Serves the accessible chat UI (static/) and a small JSON API. Security posture:
   live/offline mode.
 """
 
+import json
 import logging
 import os
 import threading
@@ -21,7 +22,7 @@ import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import assistant, data
@@ -52,6 +53,8 @@ _SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    # Only honoured over HTTPS (ignored on plain HTTP), so safe in local dev.
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
 }
 
 
@@ -227,6 +230,7 @@ def enforce_rate_limit(request: Request) -> None:
 
 
 @app.get("/healthz", response_model=Health)
+@app.get("/api/healthz", response_model=Health)
 def healthz() -> Health:
     """Liveness probe reporting whether the live LLM is available."""
     return Health(status="ok", llm="live" if assistant.api_key_configured() else "offline")
@@ -271,6 +275,42 @@ def chat(body: ChatRequest, _rate: None = Depends(enforce_rate_limit)) -> ChatRe
         history=[turn.model_dump() for turn in body.history],
     )
     return ChatResponse(reply=reply.text, mode=reply.mode, venue_id=body.profile.venue_id)
+
+
+@app.post("/api/chat/stream")
+def chat_stream(
+    body: ChatRequest, _rate: None = Depends(enforce_rate_limit)
+) -> StreamingResponse:
+    """Answer a chat message as a stream of newline-delimited JSON (NDJSON) frames.
+
+    Frames:
+      {"type": "meta",  "mode": "live"|"offline", "venue_id": <id|null>}   (first)
+      {"type": "delta", "text": "..."}                                     (0+)
+      {"type": "error"}                                                    (on failure)
+
+    Same guarantees as /api/chat: strict security headers (via middleware),
+    per-IP rate limit, and statelessness — the body is never logged or persisted
+    and history is supplied by the client each turn.
+    """
+    events = assistant.answer_stream(
+        body.message,
+        profile=body.profile.model_dump(),
+        history=[turn.model_dump() for turn in body.history],
+    )
+    venue_id = body.profile.venue_id
+
+    def _frames():
+        try:
+            for kind, payload in events:
+                if kind == "meta":
+                    frame = {"type": "meta", "mode": payload, "venue_id": venue_id}
+                else:
+                    frame = {"type": "delta", "text": payload}
+                yield json.dumps(frame, ensure_ascii=False) + "\n"
+        except Exception:  # never leak a stack trace into the response stream
+            yield json.dumps({"type": "error"}) + "\n"
+
+    return StreamingResponse(_frames(), media_type="application/x-ndjson")
 
 
 @app.get("/", include_in_schema=False)

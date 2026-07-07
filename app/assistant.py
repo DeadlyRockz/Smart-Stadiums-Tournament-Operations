@@ -15,7 +15,7 @@ the whole app with no credentials.
 
 import os
 from dataclasses import dataclass, field
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from google import genai
@@ -185,6 +185,31 @@ def api_key_configured() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
 
 
+#: Process-wide cached client, built lazily on the first live request and reused
+#: across requests so we don't reconstruct the SDK client — and its underlying
+#: connection pool / TLS session to the Gemini endpoint — on every turn.
+_client: "genai.Client | None" = None
+
+
+def _get_client() -> "genai.Client":
+    """Return the shared Gemini client, constructing it on first use.
+
+    Only ever called from the live path (guarded by ``api_key_configured``), so
+    the key is present when the client auto-reads it at construction.
+    """
+    global _client
+    if _client is None:
+        _client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
+    return _client
+
+
+def _reset_client() -> None:
+    """Drop the cached client. Tests call this between cases because each one
+    monkeypatches ``genai.Client`` with a fresh scripted fake."""
+    global _client
+    _client = None
+
+
 def _decline_language(profile: Mapping[str, Any]) -> str:
     """Resolve the language for a safety decline (falls back to English)."""
     code = profile.get("language")
@@ -240,7 +265,7 @@ def _live_answer(
     VERBATIM (thought signatures must survive on 3.x), and return ALL function
     responses in ONE user Content (required for parallel function calling).
     """
-    client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
+    client = _get_client()  # shared, reused across requests
     contents = _build_contents(message, profile, history)
     calls_made: list[str] = []
 
@@ -291,9 +316,12 @@ def answer(
     """Answer a user message, preferring the live model, falling back offline.
 
     Falls back to the offline engine when no API key is configured, or on a
-    Gemini auth/rate-limit error (401/403/429), a 5xx server error, or a
-    connection failure — so the app always answers. Other 4xx client errors
-    (our own bug) are re-raised.
+    Gemini auth/rate-limit error (401/403/429), a missing model/resource
+    (404), a 5xx server error, or a connection failure — so the app always
+    answers. A 404 is treated as environmental (e.g. the model id is not
+    available to this key) rather than a request bug, so it degrades instead
+    of 500-ing. Other 4xx client errors (400 = our own malformed request) are
+    re-raised.
     """
     profile = profile or {}
     if not api_key_configured():
@@ -301,10 +329,132 @@ def answer(
     try:
         return _live_answer(message, profile, history or [])
     except errors.ClientError as exc:  # 4xx
-        if exc.code in (401, 403, 429):
+        if exc.code in (401, 403, 404, 429):
             return _offline_reply(message, profile)
         raise
     except errors.ServerError:  # 5xx
         return _offline_reply(message, profile)
     except (errors.APIError, ConnectionError, TimeoutError):
         return _offline_reply(message, profile)
+
+
+# =====================================================================
+# Streaming API — same behaviour as answer(), emitted incrementally.
+#
+# answer_stream yields (event, payload) tuples: exactly one ("meta", mode)
+# first, then zero or more ("delta", text) pieces. It reuses every helper the
+# non-streaming path uses; only the model calls differ (generate_content_stream
+# instead of generate_content). The verified answer()/_live_answer are left
+# untouched so the JSON /api/chat endpoint and its tests are unaffected.
+# =====================================================================
+
+
+def _live_stream_events(
+    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]]
+) -> Iterator[tuple[str, str]]:
+    """Yield ("delta", text) pieces from the live streamed tool loop.
+
+    Mirrors :func:`_live_answer`'s manual function-calling loop, but every model
+    turn is streamed. Text is read from each chunk's parts (excluding ``thought``
+    parts) and forwarded as it arrives; a turn that emits function calls has its
+    model content rebuilt VERBATIM from the streamed parts (so thought signatures
+    survive on 3.x), its tools executed, and all responses returned in ONE user
+    Content — exactly as the non-streaming loop does. Yields the localized
+    decline if the model produced no visible text at all.
+    """
+    client = _get_client()
+    contents = _build_contents(message, profile, history)
+    produced_text = False
+
+    for _ in range(_MAX_TOOL_ITERATIONS):
+        stream = client.models.generate_content_stream(
+            model=MODEL, contents=contents, config=_CONFIG
+        )
+        model_parts: list[types.Part] = []
+        calls: list[Any] = []
+        for chunk in stream:
+            candidates = chunk.candidates or []
+            parts = (
+                candidates[0].content.parts
+                if candidates and candidates[0].content and candidates[0].content.parts
+                else []
+            )
+            model_parts.extend(parts)
+            text = "".join(
+                p.text
+                for p in parts
+                if getattr(p, "text", None) and not getattr(p, "thought", False)
+            )
+            if text:
+                produced_text = True
+                yield ("delta", text)
+            calls.extend(
+                p.function_call for p in parts if getattr(p, "function_call", None)
+            )
+        if not calls:
+            break
+        # Tool turn: append the model content verbatim (rebuilt from the streamed
+        # parts), run the tools, and return all responses in ONE user Content.
+        contents.append(types.Content(role="model", parts=model_parts))
+        response_parts = [
+            types.Part.from_function_response(
+                name=call.name,
+                response={"result": tools.execute_tool(call.name, dict(call.args or {}))},
+            )
+            for call in calls
+        ]
+        contents.append(types.Content(role="user", parts=response_parts))
+
+    if not produced_text:
+        yield ("delta", _DECLINE[_decline_language(profile)])
+
+
+def _offline_events(
+    message: str, profile: Mapping[str, Any]
+) -> Iterator[tuple[str, str]]:
+    """Emit the deterministic offline reply as a meta frame + a single delta."""
+    yield ("meta", "offline")
+    yield ("delta", offline.offline_answer(message, profile))
+
+
+def answer_stream(
+    message: str,
+    profile: Mapping[str, Any] | None = None,
+    history: Sequence[Mapping[str, Any]] | None = None,
+) -> Iterator[tuple[str, str]]:
+    """Stream a reply: one ("meta", mode) frame, then ("delta", text) pieces.
+
+    Prefers the live model and falls back to the deterministic offline engine on
+    the same triggers as :func:`answer` (no key, 401/403/404/429, 5xx,
+    connection/timeout). Streaming caveat: the fallback is clean only *before*
+    any text has been sent — a failure mid-stream cannot un-send the partial
+    answer, so the stream simply ends there (mode already reported as "live").
+    """
+    profile = profile or {}
+    if not api_key_configured():
+        yield from _offline_events(message, profile)
+        return
+
+    events = _live_stream_events(message, profile, history or [])
+    try:
+        first = next(events)
+    except StopIteration:  # defensive: the loop always yields at least a decline
+        yield ("meta", "live")
+        yield ("delta", _DECLINE[_decline_language(profile)])
+        return
+    except errors.ClientError as exc:  # 4xx
+        if exc.code in (401, 403, 404, 429):
+            yield from _offline_events(message, profile)
+            return
+        raise  # 400 etc. — our own bug, surface it
+    except (errors.APIError, ConnectionError, TimeoutError):  # 5xx / network
+        yield from _offline_events(message, profile)
+        return
+
+    # First chunk arrived without error — commit to the live mode and stream on.
+    yield ("meta", "live")
+    yield first
+    try:
+        yield from events
+    except (errors.APIError, ConnectionError, TimeoutError):
+        return  # partial answer already sent; end the stream gracefully
