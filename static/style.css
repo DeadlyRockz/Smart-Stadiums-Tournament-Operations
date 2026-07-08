@@ -73,7 +73,7 @@
     --accent: #4ea3e0;        /* ~6:1 on dark surface */
     --accent-2: #3b8fd4;
     --accent-strong: #6fb6e8;
-    --accent-soft: #16344d;
+    --accent-soft: #0f202f;   /* dark enough that accent-strong text on hover stays >=7:1 */
     --accent-text: #06121d;
     --focus: #ff77aa;         /* bright focus ring on dark */
     --user-grad-1: #2c608f;
@@ -469,7 +469,9 @@ select:focus,
   to   { opacity: 1; transform: none; }
 }
 
-/* Author label — meaning is carried by text ("You:"/"AccessMate:") not colour */
+/* Author label — meaning is carried by text ("You:"/"AccessMate:") not colour.
+   Full opacity: a dimmed label would blend toward the bubble background and
+   quietly drop the AAA contrast the author colours below are chosen for. */
 .msg__author {
   display: block;
   font-weight: 700;
@@ -477,7 +479,6 @@ select:focus,
   letter-spacing: 0.03em;
   text-transform: uppercase;
   margin-bottom: 0.2rem;
-  opacity: 0.9;
 }
 .msg__text { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
 

@@ -2,9 +2,8 @@
 
 Wraps the google-genai SDK (the current SDK — NOT the deprecated
 ``google.generativeai``) with a manual function-calling loop over the tools in
-``app.tools``. Design and every SDK call here are copied from the verified
-snippets in ``plans/01-accessmate.md`` Phase 0.1 (checked against
-ai.google.dev/gemini-api/docs and the googleapis/python-genai reference).
+``app.tools``. Every SDK call here is checked against the official reference
+(ai.google.dev/gemini-api/docs and the googleapis/python-genai repository).
 
 Graceful degradation is a product feature: when no ``GEMINI_API_KEY`` /
 ``GOOGLE_API_KEY`` is configured, or the live API returns an auth/rate-limit/
@@ -23,12 +22,13 @@ from google.genai import errors, types
 
 from app import offline, tools
 
-#: Gemini model driving the live path; must support function calling. Override
-#: with the GEMINI_MODEL environment variable to match your key's tier (for
-#: example a free-tier key may need a different flash model id). If the
-#: configured id is not available to the key, the API returns 404 and the app
-#: degrades to offline mode instead of failing.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+#: Gemini model driving the live path; must support function calling.
+#: ``gemini-2.5-flash`` is available on a free AI Studio key, so evaluators see
+#: the live path without billing enabled. Override with the GEMINI_MODEL
+#: environment variable for a different tier or model id. If the configured id
+#: is not available to the key, the API returns 404 and the app degrades to
+#: offline mode instead of failing.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 #: Iteration cap on the function-calling loop — prevents runaway tool loops.
 _MAX_TOOL_ITERATIONS = 8

@@ -11,9 +11,9 @@ structured venue dataset.
 
 It runs in two modes:
 
-- **Live mode** — Google **Gemini** (`gemini-3.5-flash` by default; override with
-  `GEMINI_MODEL` to match your key's tier) drives a function-calling loop over
-  the venue tools.
+- **Live mode** — Google **Gemini** (`gemini-2.5-flash` by default, free-tier
+  eligible; override with `GEMINI_MODEL` to match your key's tier) drives a
+  function-calling loop over the venue tools.
 - **Offline mode** — a deterministic keyword/intent engine answers from the same
   tools with **no API key and no network**, so evaluators can run the whole app
   with zero credentials. The app auto-selects offline when no key is set or the
@@ -50,7 +50,7 @@ stadium they are visiting.
 flowchart TD
     UI["Accessible web UI<br/>(static/: HTML/CSS/JS)"] -->|POST /api/chat| API["FastAPI layer<br/>app/main.py + app/schemas.py"]
     API --> ASST["Assistant core<br/>app/assistant.py"]
-    ASST -->|key set & reachable| GEM["Gemini gemini-3.5-flash<br/>manual function-calling loop"]
+    ASST -->|key set & reachable| GEM["Gemini gemini-2.5-flash<br/>manual function-calling loop"]
     ASST -->|no key / 401·403·429 / 5xx / no network| OFF["Offline engine<br/>app/offline.py (deterministic)"]
     GEM --> TOOLS["Tools<br/>app/tools.py"]
     OFF --> TOOLS

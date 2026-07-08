@@ -76,12 +76,12 @@ function appendMessage(role, text) {
   wrap.appendChild(author);
   wrap.appendChild(body);
 
-  // Arabic replies read right-to-left; everything else left-to-right.
-  if (els.language.value === "ar") {
-    wrap.setAttribute("dir", "rtl");
-  } else {
-    wrap.setAttribute("dir", "ltr");
-  }
+  // Stamp lang/dir on this bubble at creation time (not just the transcript
+  // container), so a later language switch can't retroactively change how a
+  // screen reader pronounces messages that were already sent.
+  const lang = els.language.value;
+  wrap.setAttribute("lang", lang);
+  wrap.setAttribute("dir", lang === "ar" ? "rtl" : "ltr");
 
   els.transcript.appendChild(wrap);
   els.transcript.scrollTop = els.transcript.scrollHeight;
