@@ -468,7 +468,7 @@ def _detect_intent(normalized: str) -> tuple[str, str | None]:
     return "help", None
 
 
-def _resolve_language(code: Any, detected: str | None) -> str:
+def _resolve_language(code: object, detected: str | None) -> str:
     """Profile language wins; unknown codes fall back to English."""
     if isinstance(code, str) and code.strip():
         short = code.strip().lower()[:2]
@@ -522,7 +522,7 @@ def _accessibility_answer(venue_id: str, need: str, lang: str) -> str:
 
 
 def _services_answer(
-    venue: data.Venue, normalized: str, lang: str
+    venue: data.Venue, normalized: str, lang: str,
 ) -> str:
     """Answer nursing room / first aid / prayer room questions."""
     templates = _TEMPLATES[lang]
@@ -530,11 +530,11 @@ def _services_answer(
     for service, keywords in _SERVICE_KEYWORDS:
         if any(_contains(normalized, keyword) for keyword in keywords):
             return templates[service].format(
-                venue=venue["name"], value=_clause(services[service])
+                venue=venue["name"], value=_clause(services[service]),
             )
     return " ".join(
         templates[service].format(
-            venue=venue["name"], value=_clause(services[service])
+            venue=venue["name"], value=_clause(services[service]),
         )
         for service, _ in _SERVICE_KEYWORDS
     )
@@ -563,17 +563,17 @@ def _navigation_answer(venue_id: str, lang: str) -> str:
             notes=_clause(gate.get("notes", "")),
             level=_LEVELS[lang][level],
             hint=_sentence(hint["services"]["quiet_route_hint"]),
-        )
+        ),
     ]
     if status["elevator_outage"] is not None:
         parts.append(
-            templates["outage"].format(gate=status["elevator_outage"]["gate"])
+            templates["outage"].format(gate=status["elevator_outage"]["gate"]),
         )
     return " ".join(parts)
 
 
 def _schedule_answer(venue: data.Venue | None, lang: str) -> str:
-    """Opening match / final dates, venue-specific when possible."""
+    """Render opening match / final dates, venue-specific when possible."""
     templates = _TEMPLATES[lang]
     parts: list[str] = []
     if venue is not None:
@@ -581,14 +581,14 @@ def _schedule_answer(venue: data.Venue | None, lang: str) -> str:
         if "hosts_opening_match" in matchday:
             parts.append(
                 templates["schedule_opening"].format(
-                    venue=venue["name"], date=matchday["hosts_opening_match"]
-                )
+                    venue=venue["name"], date=matchday["hosts_opening_match"],
+                ),
             )
         if "hosts_final" in matchday:
             parts.append(
                 templates["schedule_final"].format(
-                    venue=venue["name"], date=matchday["hosts_final"]
-                )
+                    venue=venue["name"], date=matchday["hosts_final"],
+                ),
             )
     tournament = data.load_venues()["tournament"]
     if not parts:
@@ -601,14 +601,32 @@ def _schedule_answer(venue: data.Venue | None, lang: str) -> str:
                 open_venue=opening_venue["name"] if opening_venue else "?",
                 final_date=final["date"],
                 final_venue=final_venue["name"] if final_venue else "?",
-            )
+            ),
         )
     parts.append(
         templates["tickets"].format(
-            types=", ".join(tournament["accessibility_tickets"]["types"])
-        )
+            types=", ".join(tournament["accessibility_tickets"]["types"]),
+        ),
     )
     return " ".join(parts)
+
+
+def _venue_intent_answer(
+    intent: str, venue: data.Venue, normalized: str, profile: Mapping[str, Any], lang: str,
+) -> str:
+    """Render the reply for an intent that requires a selected venue."""
+    templates = _TEMPLATES[lang]
+    if intent == "accessibility":
+        return _accessibility_answer(
+            venue["id"], _resolve_need(normalized, profile), lang,
+        )
+    if intent == "services":
+        return _services_answer(venue, normalized, lang)
+    if intent == "food_water":
+        return templates["food_water"].format(
+            venue=venue["name"], water=_clause(venue["services"]["water"]),
+        )
+    return _navigation_answer(venue["id"], lang)
 
 
 def offline_answer(message: str, profile: Mapping[str, Any] | None = None) -> str:
@@ -625,26 +643,17 @@ def offline_answer(message: str, profile: Mapping[str, Any] | None = None) -> st
     lang = _resolve_language(profile.get("language"), detected_lang)
     templates = _TEMPLATES[lang]
 
-    venue_id = profile.get("venue_id")
-    venue = data.get_venue(venue_id) if isinstance(venue_id, str) else None
-
     if intent == "greeting":
         return templates["greeting"]
     if intent == "help":
         return templates["help"]
+
+    venue_id = profile.get("venue_id")
+    venue = data.get_venue(venue_id) if isinstance(venue_id, str) else None
+
     if intent == "schedule":
         return _schedule_answer(venue, lang)
     # Every remaining intent needs a venue.
     if venue is None:
         return templates["pick_venue"].format(examples=_venue_examples())
-    if intent == "accessibility":
-        return _accessibility_answer(
-            venue["id"], _resolve_need(normalized, profile), lang
-        )
-    if intent == "services":
-        return _services_answer(venue, normalized, lang)
-    if intent == "food_water":
-        return templates["food_water"].format(
-            venue=venue["name"], water=_clause(venue["services"]["water"])
-        )
-    return _navigation_answer(venue["id"], lang)
+    return _venue_intent_answer(intent, venue, normalized, profile, lang)

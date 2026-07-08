@@ -159,7 +159,7 @@ _TOOLS = types.Tool(
             },
             ["venue_id"],
         ),
-    ]
+    ],
 )
 
 #: Module-level config — frozen system instruction + tools, byte-stable so the
@@ -184,14 +184,24 @@ class AssistantReply:
 
 
 def api_key_configured() -> bool:
-    """True when a Gemini API key is present in the environment."""
+    """Report whether a Gemini API key is present in the environment."""
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
 
 
-#: Process-wide cached client, built lazily on the first live request and reused
-#: across requests so we don't reconstruct the SDK client — and its underlying
-#: connection pool / TLS session to the Gemini endpoint — on every turn.
-_client: "genai.Client | None" = None
+class _ClientCache:
+    """Process-wide cached client, built lazily on the first live request.
+
+    Reused across requests so we don't reconstruct the SDK client — and its
+    underlying connection pool / TLS session to the Gemini endpoint — on every
+    turn. A holder object (rather than a rebound module global) avoids the
+    ``global`` statement anti-pattern while keeping the same lazy-singleton
+    behaviour.
+    """
+
+    client: "genai.Client | None" = None
+
+
+_cache = _ClientCache()
 
 
 def _get_client() -> "genai.Client":
@@ -200,17 +210,18 @@ def _get_client() -> "genai.Client":
     Only ever called from the live path (guarded by ``api_key_configured``), so
     the key is present when the client auto-reads it at construction.
     """
-    global _client
-    if _client is None:
-        _client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
-    return _client
+    if _cache.client is None:
+        _cache.client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
+    return _cache.client
 
 
 def _reset_client() -> None:
-    """Drop the cached client. Tests call this between cases because each one
-    monkeypatches ``genai.Client`` with a fresh scripted fake."""
-    global _client
-    _client = None
+    """Drop the cached client.
+
+    Tests call this between cases because each one monkeypatches
+    ``genai.Client`` with a fresh scripted fake.
+    """
+    _cache.client = None
 
 
 def _decline_language(profile: Mapping[str, Any]) -> str:
@@ -243,7 +254,7 @@ def _preamble(message: str, profile: Mapping[str, Any]) -> str:
 
 
 def _build_contents(
-    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]]
+    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> list[types.Content]:
     """Rebuild the stateless conversation: prior turns + current user turn."""
     contents: list[types.Content] = []
@@ -254,13 +265,13 @@ def _build_contents(
         role = "model" if turn.get("role") == "assistant" else "user"
         contents.append(types.Content(role=role, parts=[types.Part(text=text)]))
     contents.append(
-        types.Content(role="user", parts=[types.Part(text=_preamble(message, profile))])
+        types.Content(role="user", parts=[types.Part(text=_preamble(message, profile))]),
     )
     return contents
 
 
 def _live_answer(
-    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]]
+    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> AssistantReply:
     """Run the manual function-calling loop against the live Gemini API.
 
@@ -275,7 +286,7 @@ def _live_answer(
     response = None
     for _ in range(_MAX_TOOL_ITERATIONS):
         response = client.models.generate_content(
-            model=MODEL, contents=contents, config=_CONFIG
+            model=MODEL, contents=contents, config=_CONFIG,
         )
         calls = response.function_calls or []
         if not calls:
@@ -289,7 +300,7 @@ def _live_answer(
                 types.Part.from_function_response(
                     name=call.name,
                     response={"result": tools.execute_tool(call.name, dict(call.args or {}))},
-                )
+                ),
             )
         # All function responses go in ONE user Content.
         contents.append(types.Content(role="user", parts=response_parts))
@@ -307,7 +318,7 @@ def _live_answer(
 def _offline_reply(message: str, profile: Mapping[str, Any]) -> AssistantReply:
     """Deterministic answer from the offline engine (no LLM, no network)."""
     return AssistantReply(
-        text=offline.offline_answer(message, profile), mode="offline"
+        text=offline.offline_answer(message, profile), mode="offline",
     )
 
 
@@ -353,7 +364,7 @@ def answer(
 
 
 def _live_stream_events(
-    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]]
+    message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> Iterator[tuple[str, str]]:
     """Yield ("delta", text) pieces from the live streamed tool loop.
 
@@ -371,7 +382,7 @@ def _live_stream_events(
 
     for _ in range(_MAX_TOOL_ITERATIONS):
         stream = client.models.generate_content_stream(
-            model=MODEL, contents=contents, config=_CONFIG
+            model=MODEL, contents=contents, config=_CONFIG,
         )
         model_parts: list[types.Part] = []
         calls: list[Any] = []
@@ -413,7 +424,7 @@ def _live_stream_events(
 
 
 def _offline_events(
-    message: str, profile: Mapping[str, Any]
+    message: str, profile: Mapping[str, Any],
 ) -> Iterator[tuple[str, str]]:
     """Emit the deterministic offline reply as a meta frame + a single delta."""
     yield ("meta", "offline")

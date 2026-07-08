@@ -38,7 +38,7 @@ def test_unverified_venue_gets_caveat():
 
 def test_spanish_nursing_room_question_answered_in_spanish():
     answer = offline_answer(
-        "¿Dónde está el área de lactancia?", profile("es", "mexico-city")
+        "¿Dónde está el área de lactancia?", profile("es", "mexico-city"),
     )
     assert "lactancia" in answer
     assert "Ubicación" in answer
@@ -49,7 +49,7 @@ def test_spanish_nursing_room_question_answered_in_spanish():
 
 def test_french_question_answered_in_french():
     answer = offline_answer(
-        "Où sont les toilettes accessibles ?", profile("fr", "toronto")
+        "Où sont les toilettes accessibles ?", profile("fr", "toronto"),
     )
     assert "Accessibilité" in answer
     assert "Toilettes accessibles" in answer
@@ -85,7 +85,7 @@ def test_arabic_greeting_uses_arabic_template():
 def test_arabic_wheelchair_question_routes_and_renders_in_arabic():
     # "Where is the route for the wheelchair?" -> accessibility, ar template.
     answer = offline_answer(
-        "أين مسار الكرسي المتحرك؟", profile("ar", "new-york-new-jersey")
+        "أين مسار الكرسي المتحرك؟", profile("ar", "new-york-new-jersey"),
     )
     assert "إمكانية الوصول في MetLife Stadium" in answer  # ar intro + venue fact
     assert "البوابات المتاحة" in answer                    # ar "accessible gates"
@@ -119,7 +119,7 @@ def test_arabic_clitic_prefixed_keyword_still_matches():
     # "...my child with autism" — the preposition/article glue onto the noun
     # ("بالتوحد"); the engine must still route to the sensory accessibility path.
     answer = offline_answer(
-        "أريد مكاناً هادئاً لطفلي المصاب بالتوحد", profile("ar", "los-angeles")
+        "أريد مكاناً هادئاً لطفلي المصاب بالتوحد", profile("ar", "los-angeles"),
     )
     assert "الدعم الحسي" in answer  # "sensory support" field label, in Arabic
 
@@ -172,7 +172,7 @@ def test_generic_services_question_lists_all_three_services():
 
 def test_navigation_question_mentions_a_gate():
     answer = offline_answer(
-        "Which gate should I use to get in?", profile("en", "seattle")
+        "Which gate should I use to get in?", profile("en", "seattle"),
     )
     assert "Recommended entrance" in answer
     assert "Northwest Gate" in answer or "Southeast Gate" in answer
@@ -188,7 +188,7 @@ def test_navigation_answer_warns_about_elevator_outage(monkeypatch):
         lambda venue_id, hour=None: real(venue_id, hour=0),
     )
     answer = offline_answer(
-        "Which gate should I use?", profile("en", "mexico-city")
+        "Which gate should I use?", profile("en", "mexico-city"),
     )
     assert "out of service" in answer
 
@@ -204,7 +204,7 @@ def test_no_venue_asks_user_to_pick_one_with_examples():
 
 def test_no_venue_prompt_is_localized():
     answer = offline_answer(
-        "¿Hay rampa para silla de ruedas?", profile("es", None)
+        "¿Hay rampa para silla de ruedas?", profile("es", None),
     )
     assert "elija primero un estadio" in answer
 
@@ -228,14 +228,14 @@ def test_fallback_help_for_unmatched_message():
 
 def test_schedule_final_date():
     answer = offline_answer(
-        "When is the final?", profile("en", "new-york-new-jersey")
+        "When is the final?", profile("en", "new-york-new-jersey"),
     )
     assert "2026-07-19" in answer
 
 
 def test_schedule_opening_match_for_hosting_venue():
     answer = offline_answer(
-        "When is the opening match?", profile("en", "mexico-city")
+        "When is the opening match?", profile("en", "mexico-city"),
     )
     assert "opening match" in answer
     assert "2026-06-11" in answer
@@ -267,6 +267,6 @@ def test_offline_answers_are_deterministic():
 
 def test_no_emoji_in_answers():
     answer = offline_answer(
-        "Is there wheelchair access?", profile("en", "dallas")
+        "Is there wheelchair access?", profile("en", "dallas"),
     )
     assert all(ord(ch) < 0x2600 for ch in answer)

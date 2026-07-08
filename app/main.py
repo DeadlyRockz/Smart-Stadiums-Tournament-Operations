@@ -78,6 +78,7 @@ class TokenBucketLimiter:
         refill_seconds: float,
         prune_threshold: int = _BUCKET_PRUNE_THRESHOLD,
     ) -> None:
+        """Create a bucket that refills to ``capacity`` every ``refill_seconds``."""
         self.capacity = float(capacity)
         self._refill_rate = capacity / refill_seconds  # tokens per second
         self._prune_threshold = prune_threshold
@@ -155,6 +156,7 @@ class RedisTokenBucketLimiter:
         refill_seconds: float,
         namespace: str = "accessmate:rl:",
     ) -> None:
+        """Create a bucket that refills to ``capacity`` every ``refill_seconds``."""
         self.capacity = float(capacity)
         self._refill_rate = capacity / refill_seconds
         # Idle keys refill fully after refill_seconds; let them expire a bit later.
@@ -190,11 +192,11 @@ def _build_rate_limiter() -> TokenBucketLimiter | RedisTokenBucketLimiter:
     if not url:
         return TokenBucketLimiter(RATE_LIMIT_PER_MIN, 60.0)
     try:
-        import redis  # optional dependency; only needed for distributed mode
+        import redis  # noqa: PLC0415 — optional dependency, only needed for distributed mode
 
         client = redis.Redis.from_url(url, decode_responses=True)
         client.ping()
-    except Exception as exc:  # ImportError, connection/auth error, etc.
+    except Exception as exc:  # noqa: BLE001 — ImportError, connection/auth error, etc.
         logger.warning(
             "REDIS_URL is set but Redis is unavailable (%s); "
             "falling back to in-memory rate limiting.",
@@ -217,7 +219,7 @@ app.state.rate_limiter = rate_limiter
 
 @app.middleware("http")
 async def add_security_headers(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    request: Request, call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
     """Attach strict security headers to every response."""
     response = await call_next(request)
@@ -236,14 +238,14 @@ def enforce_rate_limit(request: Request) -> None:
         )
 
 
-@app.get("/healthz", response_model=Health)
-@app.get("/api/healthz", response_model=Health)
+@app.get("/healthz")
+@app.get("/api/healthz")
 def healthz() -> Health:
     """Liveness probe reporting whether the live LLM is available."""
     return Health(status="ok", llm="live" if assistant.api_key_configured() else "offline")
 
 
-@app.get("/api/venues", response_model=VenueList)
+@app.get("/api/venues")
 def list_venues() -> VenueList:
     """All tournament venues (public summary fields only)."""
     return VenueList(
@@ -256,12 +258,12 @@ def list_venues() -> VenueList:
                 capacity=v["capacity"],
             )
             for v in data.list_venues()
-        ]
+        ],
     )
 
 
 # Declared before /api/venues/{venue_id} so "search" is not read as a venue id.
-@app.get("/api/venues/search", response_model=VenueList)
+@app.get("/api/venues/search")
 def search_venues(
     q: Annotated[str, Query(min_length=1, max_length=64)],
 ) -> VenueList:
@@ -280,7 +282,7 @@ def search_venues(
                 capacity=v["capacity"],
             )
             for v in data.search_venues(q)
-        ]
+        ],
     )
 
 
@@ -293,8 +295,8 @@ def get_venue(venue_id: str) -> dict:
     return venue
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-def chat(body: ChatRequest, _rate: None = Depends(enforce_rate_limit)) -> ChatResponse:
+@app.post("/api/chat")
+def chat(body: ChatRequest, _rate: Annotated[None, Depends(enforce_rate_limit)]) -> ChatResponse:
     """Answer a chat message (live Gemini when keyed, deterministic offline otherwise).
 
     The message body is never logged or persisted; history is supplied by the
@@ -310,7 +312,7 @@ def chat(body: ChatRequest, _rate: None = Depends(enforce_rate_limit)) -> ChatRe
 
 @app.post("/api/chat/stream")
 def chat_stream(
-    body: ChatRequest, _rate: None = Depends(enforce_rate_limit)
+    body: ChatRequest, _rate: Annotated[None, Depends(enforce_rate_limit)],
 ) -> StreamingResponse:
     """Answer a chat message as a stream of newline-delimited JSON (NDJSON) frames.
 
@@ -338,7 +340,7 @@ def chat_stream(
                 else:
                     frame = {"type": "delta", "text": payload}
                 yield json.dumps(frame, ensure_ascii=False) + "\n"
-        except Exception:  # never leak a stack trace into the response stream
+        except Exception:  # noqa: BLE001 — never leak a stack trace into the response stream
             yield json.dumps({"type": "error"}) + "\n"
 
     return StreamingResponse(_frames(), media_type="application/x-ndjson")

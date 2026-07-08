@@ -14,12 +14,12 @@ Need = Literal["mobility", "vision", "hearing", "sensory"]
 
 #: A user-authored message: whitespace-trimmed, 1..2000 characters.
 MessageStr = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000),
 ]
 
 #: A 2-letter language code (e.g. "en", "es", "fr", "ar").
 LanguageStr = Annotated[
-    str, StringConstraints(strip_whitespace=True, to_lower=True, min_length=2, max_length=2)
+    str, StringConstraints(strip_whitespace=True, to_lower=True, min_length=2, max_length=2),
 ]
 
 
@@ -50,7 +50,7 @@ class ChatRequest(BaseModel):
     message: MessageStr
     profile: Profile = Field(default_factory=Profile)
     history: Annotated[list[HistoryTurn], Field(max_length=20)] = Field(
-        default_factory=list
+        default_factory=list,
     )
 
 

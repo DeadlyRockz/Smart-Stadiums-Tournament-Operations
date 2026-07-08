@@ -30,13 +30,13 @@ def _reset_gemini_client():
 
 @pytest.fixture
 def venue_id() -> str:
-    """A stable, real venue id (MetLife Stadium — hosts the final)."""
+    """Return a stable, real venue id (MetLife Stadium — hosts the final)."""
     return VENUE_ID
 
 
 @pytest.fixture
 def client():
-    """A TestClient with the rate limiter reset before and after the test."""
+    """Return a TestClient with the rate limiter reset before and after the test."""
     rate_limiter.reset()
     with TestClient(app) as test_client:
         yield test_client
@@ -60,6 +60,7 @@ class FakeResponse:
     """Mimics a google-genai GenerateContentResponse for tests."""
 
     def __init__(self, *, function_calls=None, text=None, model_turn=None):
+        """Store the scripted function calls, text, and model turn content."""
         self.function_calls = function_calls or []
         self.text = text
         self.candidates = [_FakeCandidate(model_turn)] if model_turn else []
@@ -69,6 +70,7 @@ class FakeGeminiClient:
     """Returns a scripted sequence of FakeResponse objects."""
 
     def __init__(self, responses):
+        """Store the scripted responses to pop one per ``generate_content`` call."""
         self._responses = list(responses)
 
         class _Models:
@@ -83,7 +85,7 @@ class FakeGeminiClient:
 
 @pytest.fixture
 def make_function_call():
-    """Factory to build a fake model function-call for the scripted responses."""
+    """Build the factory used to create a fake model function-call for scripted responses."""
     return _FakeCall
 
 
@@ -110,6 +112,7 @@ class FakeChunk:
     """One streamed GenerateContentResponse chunk, built from real Parts."""
 
     def __init__(self, *, parts=None):
+        """Wrap ``parts`` in a single fake candidate, mirroring a real streamed chunk."""
         content = types.Content(role="model", parts=parts) if parts is not None else None
         self.candidates = [_FakeCandidate(content)] if content is not None else []
 
@@ -118,6 +121,7 @@ class FakeStreamingClient:
     """Returns a scripted list of chunks per generate_content_stream call."""
 
     def __init__(self, turns):
+        """Store the scripted per-turn chunk lists to pop one per streamed call."""
         self._turns = list(turns)  # list[list[FakeChunk]] — one inner list per turn
         self.contents_snapshots = []
 
@@ -134,21 +138,21 @@ class FakeStreamingClient:
 
 @pytest.fixture
 def text_chunk():
-    """Factory: a streamed chunk carrying a text delta."""
+    """Build the factory for a streamed chunk carrying a text delta."""
     return lambda text: FakeChunk(parts=[types.Part(text=text)])
 
 
 @pytest.fixture
 def call_chunk():
-    """Factory: a streamed chunk carrying a single function call."""
+    """Build the factory for a streamed chunk carrying a single function call."""
     return lambda name, args: FakeChunk(
-        parts=[types.Part(function_call=types.FunctionCall(name=name, args=args))]
+        parts=[types.Part(function_call=types.FunctionCall(name=name, args=args))],
     )
 
 
 @pytest.fixture
 def empty_chunk():
-    """Factory: a streamed chunk with no visible text and no calls (blocked)."""
+    """Build the factory for a streamed chunk with no visible text and no calls (blocked)."""
     return lambda: FakeChunk(parts=[])
 
 

@@ -381,7 +381,10 @@ select:focus,
   font: inherit;
   font-weight: 600;
   background: var(--surface);
-  color: var(--accent);
+  /* accent-strong, not accent: keeps text-on-surface contrast at WCAG AAA
+     (>=7:1), not just AA. Border stays the lighter accent (3:1 non-text
+     minimum is already comfortably met). */
+  color: var(--accent-strong);
   border: 0.09375rem solid var(--accent);
   border-radius: 2rem;
   padding: 0.5rem 1rem;
@@ -495,7 +498,8 @@ select:focus,
   border: 0.0625rem solid var(--border);
   border-bottom-left-radius: 0.3rem;
 }
-.msg--assistant .msg__author { color: var(--accent); }
+/* accent-strong for WCAG AAA text contrast (>=7:1) against the assistant bubble */
+.msg--assistant .msg__author { color: var(--accent-strong); }
 
 /* RTL bubbles (Arabic) flip the tucked corner to the other side */
 .msg[dir="rtl"] { text-align: right; }

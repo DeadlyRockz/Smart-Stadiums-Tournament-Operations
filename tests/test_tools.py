@@ -167,7 +167,7 @@ def test_get_live_status_without_accessible_gates_degrades_cleanly(monkeypatch):
             "gates": [
                 {"name": "Gate 1", "accessible": False, "notes": ""},
                 {"name": "Gate 2", "accessible": False, "notes": ""},
-            ]
+            ],
         },
     }
     monkeypatch.setattr(tools.data, "get_venue", lambda venue_id: fake_venue)
@@ -266,7 +266,7 @@ def test_execute_tool_missing_or_malformed_args_never_raise():
 
 def test_execute_tool_drops_unexpected_args():
     parsed = json.loads(
-        execute_tool("get_venue_info", {"venue_id": "dallas", "bogus": True})
+        execute_tool("get_venue_info", {"venue_id": "dallas", "bogus": True}),
     )
     assert "error" not in parsed
 
@@ -274,8 +274,8 @@ def test_execute_tool_drops_unexpected_args():
 def test_execute_tool_validates_need_enum_via_fallback():
     parsed = json.loads(
         execute_tool(
-            "find_accessible_services", {"venue_id": "dallas", "need": "warp"}
-        )
+            "find_accessible_services", {"venue_id": "dallas", "need": "warp"},
+        ),
     )
     assert parsed["need"] == "general"
     assert "note" in parsed

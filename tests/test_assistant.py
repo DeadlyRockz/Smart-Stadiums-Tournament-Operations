@@ -75,7 +75,7 @@ def test_function_call_roundtrip_appends_model_turn_and_one_user_content(monkeyp
     _patch_client(monkeypatch, client)
 
     reply = assistant.answer(
-        "wheelchair access at MetLife?", profile={"venue_id": VENUE, "language": "en"}
+        "wheelchair access at MetLife?", profile={"venue_id": VENUE, "language": "en"},
     )
 
     assert reply.mode == "live"
@@ -153,7 +153,7 @@ def test_client_error_401_falls_back_to_offline(monkeypatch):
     _patch_client(monkeypatch, _RaisingClient())
 
     reply = assistant.answer(
-        "wheelchair access?", profile={"venue_id": VENUE, "language": "en"}
+        "wheelchair access?", profile={"venue_id": VENUE, "language": "en"},
     )
 
     assert reply.mode == "offline"

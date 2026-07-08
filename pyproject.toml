@@ -40,6 +40,20 @@ select = [
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
     "RUF", # ruff-native rules
+    "COM812", # missing trailing comma
+    "ANN401", # disallow bare `Any` in signatures (use `object` at boundaries)
+    "BLE001", # no blind `except Exception` without justification
+    "D104",   # undocumented public package
+    "D107",   # undocumented `__init__`
+    "D205",   # missing blank line after docstring summary
+    "D209",   # multi-line docstring closing quotes on their own line
+    "D401",   # docstring summary in imperative mood
+    "FAST001", # redundant FastAPI response_model
+    "FAST002", # FastAPI dependency without Annotated
+    "PLC0415", # import not at top-level (flag; justify or move per-case)
+    "PLR0911", # too many return statements
+    "PLW0603", # global statement (prefer a holder object)
+    "S311",    # non-cryptographic random usage (flag; justify if intentional)
 ]
 # The Arabic keyword tables and their docstrings legitimately contain letters
 # the confusable detector maps to Latin lookalikes.
@@ -48,7 +62,9 @@ allowed-confusables = ["ا", "أ", "إ", "آ", "ئ", "ي", "و", "ه"]
 [tool.ruff.lint.per-file-ignores]
 # Test fakes deliberately mirror the google-genai client attribute shape
 # (`client.models.generate_content`), so the inner class is named `models`.
-"tests/*" = ["N801"]
+# PLC0415 is also ignored here: importing inside a test function is the
+# idiomatic way to scope a monkeypatch target to a single test.
+"tests/*" = ["N801", "PLC0415"]
 
 [tool.coverage.run]
 source = ["app"]

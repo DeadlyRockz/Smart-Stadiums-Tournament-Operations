@@ -21,7 +21,7 @@ from app import data
 JSONDict = dict[str, Any]
 
 VALID_NEEDS: frozenset[str] = frozenset(
-    {"mobility", "vision", "hearing", "sensory", "general"}
+    {"mobility", "vision", "hearing", "sensory", "general"},
 )
 CONGESTION_LEVELS: tuple[str, ...] = ("low", "moderate", "high")
 
@@ -50,14 +50,14 @@ _ELEVATOR_OUTAGE_PROBABILITY = 0.15
 _ARRIVAL_MINUTES = {"low": 60, "moderate": 75, "high": 90}
 
 
-def _venue_error(venue_id: Any) -> JSONDict:
+def _venue_error(venue_id: object) -> JSONDict:
     """Friendly error payload for an unknown venue id."""
     examples = ", ".join(v["id"] for v in data.list_venues()[:3])
     return {
         "error": (
             f"Unknown venue id {venue_id!r}. "
             f"Use one of the 16 tournament venue ids, for example: {examples}."
-        )
+        ),
     }
 
 
@@ -66,7 +66,7 @@ def _copy_gates(venue: data.Venue) -> list[JSONDict]:
     return [dict(gate) for gate in venue["accessibility"]["gates"]]
 
 
-def _normalize_need(need: Any) -> tuple[str, str | None]:
+def _normalize_need(need: object) -> tuple[str, str | None]:
     """Return a valid need value plus an optional fallback note."""
     if isinstance(need, str) and need.strip().lower() in VALID_NEEDS:
         return need.strip().lower(), None
@@ -77,7 +77,7 @@ def _normalize_need(need: Any) -> tuple[str, str | None]:
     return "general", note
 
 
-def _normalize_needs(needs: Any) -> tuple[list[str], str | None]:
+def _normalize_needs(needs: object) -> tuple[list[str], str | None]:
     """Coerce ``needs`` into a list of valid need values (fallback: general)."""
     if isinstance(needs, str):
         needs = [needs]
@@ -104,14 +104,14 @@ def _normalize_needs(needs: Any) -> tuple[list[str], str | None]:
 
 
 def get_venue_info(venue_id: str) -> JSONDict:
-    """Basic venue facts: names, location, capacity, gates, matchday basics."""
+    """Return basic venue facts: names, location, capacity, gates, matchday basics."""
     venue = data.get_venue(venue_id)
     if venue is None:
         return _venue_error(venue_id)
     tournament = data.load_venues()["tournament"]
     matchday: JSONDict = {
         "accessibility_ticket_types": list(
-            tournament["accessibility_tickets"]["types"]
+            tournament["accessibility_tickets"]["types"],
         ),
         "companion_tickets": tournament["accessibility_tickets"]["companion_tickets"],
     }
@@ -134,7 +134,7 @@ def get_venue_info(venue_id: str) -> JSONDict:
 
 
 def find_accessible_services(venue_id: str, need: str = "general") -> JSONDict:
-    """Accessibility services at a venue, filtered by declared need.
+    """Return accessibility services at a venue, filtered by declared need.
 
     ``need`` must be one of mobility/vision/hearing/sensory/general; anything
     else falls back to "general" with an explanatory note. The result carries
@@ -162,7 +162,7 @@ def find_accessible_services(venue_id: str, need: str = "general") -> JSONDict:
 
 
 def _quiet_entrance(
-    gate_congestion: list[JSONDict], outage_gate: str | None
+    gate_congestion: list[JSONDict], outage_gate: str | None,
 ) -> str | None:
     """Least congested accessible gate, avoiding an elevator outage if possible."""
     ranked = sorted(
@@ -176,7 +176,7 @@ def _quiet_entrance(
 
 
 def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
-    """SIMULATED live operations feed for a venue.
+    """Return the SIMULATED live operations feed for a venue.
 
     Deterministic pseudo-random output seeded by venue id + hour: per-gate
     congestion (low/moderate/high), a possible elevator outage keyed to an
@@ -193,7 +193,7 @@ def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
             hour = int(hour) % 24
         except (TypeError, ValueError):
             hour = datetime.now(UTC).hour
-    rng = random.Random(f"{venue_id}-{hour}")
+    rng = random.Random(f"{venue_id}-{hour}")  # noqa: S311 — deterministic simulation, not security
     gates = venue["accessibility"]["gates"]
     gate_congestion = [
         {
@@ -249,7 +249,7 @@ def plan_visit(
 
     gate_name = status["quiet_entrance"]
     gate = next(
-        (g for g in accessibility["gates"] if g["name"] == gate_name), None
+        (g for g in accessibility["gates"] if g["name"] == gate_name), None,
     )
     congestion = next(
         (
@@ -297,7 +297,7 @@ def plan_visit(
                 "action": "need_support",
                 "need": need,
                 "tips": tips,
-            }
+            },
         )
     if status["elevator_outage"] is not None:
         steps.append(
@@ -306,7 +306,7 @@ def plan_visit(
                 "action": "elevator_outage_warning",
                 "gate": status["elevator_outage"]["gate"],
                 "note": status["elevator_outage"]["note"],
-            }
+            },
         )
 
     result: JSONDict = {
@@ -344,7 +344,7 @@ def execute_tool(name: str, args: dict[str, Any] | None) -> str:
             "error": (
                 f"Unknown tool {name!r}. "
                 f"Available tools: {', '.join(sorted(_TOOL_REGISTRY))}."
-            )
+            ),
         }
         return json.dumps(payload, ensure_ascii=False)
     func, accepted = _TOOL_REGISTRY[name]
@@ -356,6 +356,6 @@ def execute_tool(name: str, args: dict[str, Any] | None) -> str:
         return json.dumps(_venue_error(venue_id), ensure_ascii=False)
     try:
         result = func(**kwargs)
-    except Exception as exc:  # defensive: tools should never raise upstream
+    except Exception as exc:  # noqa: BLE001 — defensive: tools should never raise upstream
         result = {"error": f"Tool {name!r} failed on the given arguments: {exc}"}
     return json.dumps(result, ensure_ascii=False)

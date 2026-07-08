@@ -189,7 +189,7 @@ def test_build_rate_limiter_falls_back_when_redis_unreachable(monkeypatch):
 
 def test_build_rate_limiter_uses_redis_when_available(monkeypatch):
     fake_module = types.SimpleNamespace(
-        Redis=types.SimpleNamespace(from_url=lambda *a, **k: _PingableFake())
+        Redis=types.SimpleNamespace(from_url=lambda *a, **k: _PingableFake()),
     )
     monkeypatch.setitem(sys.modules, "redis", fake_module)
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")

@@ -29,7 +29,7 @@ def _no_key(monkeypatch):
 def test_offline_stream_without_key(monkeypatch):
     _no_key(monkeypatch)
     events = list(
-        assistant.answer_stream("wheelchair access?", {"venue_id": VENUE, "language": "en"})
+        assistant.answer_stream("wheelchair access?", {"venue_id": VENUE, "language": "en"}),
     )
     assert events[0] == ("meta", "offline")
     assert events[1][0] == "delta" and events[1][1]  # a real offline answer
@@ -49,18 +49,18 @@ def test_live_direct_text_streams_incrementally(monkeypatch, patch_gemini_stream
 
 
 def test_live_tool_round_then_streamed_answer(
-    monkeypatch, patch_gemini_stream, text_chunk, call_chunk
+    monkeypatch, patch_gemini_stream, text_chunk, call_chunk,
 ):
     _with_key(monkeypatch)
     client = patch_gemini_stream(
         [
             [call_chunk("get_venue_info", {"venue_id": VENUE})],  # turn 1: tool call
             [text_chunk("MetLife Stadium "), text_chunk("hosts the final.")],  # turn 2: answer
-        ]
+        ],
     )
 
     events = list(
-        assistant.answer_stream("tell me about MetLife", {"venue_id": VENUE, "language": "en"})
+        assistant.answer_stream("tell me about MetLife", {"venue_id": VENUE, "language": "en"}),
     )
 
     assert events[0] == ("meta", "live")
@@ -98,7 +98,7 @@ def test_auth_error_before_any_text_falls_back_offline(monkeypatch):
     monkeypatch.setattr("app.assistant.genai.Client", lambda *a, **k: _RaisingClient())
 
     events = list(
-        assistant.answer_stream("hi", {"venue_id": VENUE, "language": "en"})
+        assistant.answer_stream("hi", {"venue_id": VENUE, "language": "en"}),
     )
     assert events[0] == ("meta", "offline")
     assert events[1][0] == "delta" and events[1][1]
@@ -138,7 +138,7 @@ def test_server_error_before_any_text_falls_back_offline(monkeypatch):
 
 
 def test_streamed_tool_loop_stops_at_iteration_cap(
-    monkeypatch, patch_gemini_stream, call_chunk
+    monkeypatch, patch_gemini_stream, call_chunk,
 ):
     _with_key(monkeypatch)
     # Every scripted turn requests another tool call; the streamed loop must
@@ -174,7 +174,7 @@ def test_stream_400_client_error_is_reraised(monkeypatch):
 
 
 def test_midstream_failure_after_first_delta_ends_stream_gracefully(
-    monkeypatch, text_chunk
+    monkeypatch, text_chunk,
 ):
     _with_key(monkeypatch)
 
@@ -200,7 +200,7 @@ def test_empty_live_stream_yields_live_decline(monkeypatch):
     _with_key(monkeypatch)
     # Defensive branch: the live event generator ends without yielding anything.
     monkeypatch.setattr(
-        "app.assistant._live_stream_events", lambda *a, **k: iter(())
+        "app.assistant._live_stream_events", lambda *a, **k: iter(()),
     )
 
     events = list(assistant.answer_stream("hi", {"language": "en"}))
@@ -251,7 +251,7 @@ def test_endpoint_streams_live_deltas(client, monkeypatch, patch_gemini_stream, 
 
 
 def test_endpoint_emits_error_frame_and_no_traceback_when_stream_raises(
-    client, monkeypatch
+    client, monkeypatch,
 ):
     _no_key(monkeypatch)
 
