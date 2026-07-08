@@ -3,4 +3,6 @@
 -r requirements.txt
 ruff==0.15.20      # lint (configured in pyproject.toml)
 mypy==2.2.0        # static type check, --strict (configured in pyproject.toml)
+radon==6.0.1       # cyclomatic complexity gate: no app/ function above grade B
+interrogate==1.7.0 # docstring coverage gate: held at 100% of app/
 coverage==7.15.0   # test coverage; the suite is held at 100% (line + branch) of app/

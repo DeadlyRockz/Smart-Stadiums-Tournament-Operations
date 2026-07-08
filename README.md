@@ -159,10 +159,12 @@ mode instead of failing.
 ```bash
 python -m pytest            # 152 tests, no network required
 
-# Optional dev tooling (requirements-dev.txt): lint + type check + coverage gate
+# Optional dev tooling (requirements-dev.txt): lint + type check + quality gates
 pip install -r requirements-dev.txt
 python -m ruff check app tests            # lint: zero findings
 python -m mypy app                        # --strict type check: zero findings
+python -m interrogate app                 # docstring coverage: 100% of app/
+python -m radon cc app -n C               # complexity: no grade C+ function
 python -m coverage run -m pytest && python -m coverage report  # 100% of app/
 ```
 
@@ -182,9 +184,12 @@ integration in both modes. Verified green from a clean virtual environment
 installed only from `requirements.txt`.
 
 **Tooling:** `ruff` (rules in `pyproject.toml`, including the full `--select ALL`
-ruleset) and `mypy --strict` both pass with zero findings, and a GitHub Actions
-workflow (`.github/workflows/ci.yml`) runs lint + type check + tests on every
-push, failing if coverage drops below 100%.
+ruleset) and `mypy --strict` both pass with zero findings, docstring coverage
+(`interrogate`) is 100%, and cyclomatic complexity (`radon cc`) has no function
+above grade B (low risk). A GitHub Actions workflow
+(`.github/workflows/ci.yml`) enforces all of it — lint, type check, docstring
+coverage, the complexity gate, and tests — on every push, failing if test
+coverage drops below 100%.
 
 ---
 
@@ -238,7 +243,7 @@ push, failing if coverage drops below 100%.
 
 | Criterion | Where it is addressed |
 |---|---|
-| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions, no duplicated logic (shared helpers for venue-summary projection and Gemini tool-call execution); fully typed and `mypy --strict` clean; docstrings; `ruff` lint passes clean including the full `--select ALL` ruleset (config in `pyproject.toml`); CI enforces lint + type check + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
+| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`) kept low-complexity by design (`radon cc` grade B or better throughout, no god-functions); pure functions, no duplicated logic (shared helpers for venue-summary projection, Gemini tool-call execution, and visit-plan step building); fully typed and `mypy --strict` clean; 100% docstring coverage (`interrogate`); `ruff` lint passes clean including the full `--select ALL` ruleset (config in `pyproject.toml`); CI enforces lint + type check + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
 | **Security** | Section 6 — no secrets, strict CSP + headers, XSS-safe rendering, input caps, rate limiting, prompt-injection hygiene, key never leaked. |
 | **Efficiency** | Dataset loaded once and cached (`lru_cache`); stateless requests; frozen system prompt for a stable cache prefix; tools return compact dicts; offline mode avoids any network call. |
 | **Testing** | Section 5 — 152 tests, **100% line *and* branch coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |

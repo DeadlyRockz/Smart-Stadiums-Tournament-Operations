@@ -1,4 +1,5 @@
-# Lint + full test suite with 100% coverage enforced, on every push and PR.
+# Lint, strict type check, docstring coverage, complexity gate, and the full
+# test suite with 100% coverage enforced, on every push and PR.
 name: CI
 
 on:
@@ -25,6 +26,18 @@ jobs:
 
       - name: Type check (mypy --strict)
         run: python -m mypy app
+
+      - name: Docstring coverage (interrogate, fails under 100%)
+        run: python -m interrogate app
+
+      - name: Complexity gate (radon, fails on any grade C+ function)
+        run: |
+          hits="$(python -m radon cc app -n C)"
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::Function(s) at or above complexity grade C — refactor before merging."
+            exit 1
+          fi
 
       - name: Tests with coverage (fails under 100%)
         run: |
