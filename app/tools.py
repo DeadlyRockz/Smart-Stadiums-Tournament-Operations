@@ -227,6 +227,54 @@ def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
     }
 
 
+def _quiet_gate_and_congestion(
+    accessibility: JSONDict, status: JSONDict, gate_name: str | None,
+) -> tuple[JSONDict | None, str]:
+    """Look up the recommended gate's own record and its current congestion."""
+    gate = next(
+        (g for g in accessibility["gates"] if g["name"] == gate_name), None,
+    )
+    congestion = next(
+        (
+            entry["congestion"]
+            for entry in status["gate_congestion"]
+            if entry["gate"] == gate_name
+        ),
+        "low",
+    )
+    return gate, congestion
+
+
+def _entry_step(gate_name: str | None, gate: JSONDict | None, congestion: str) -> JSONDict:
+    """Build the 'enter via the recommended gate' step."""
+    return {
+        "action": "enter_via_gate",
+        "gate": gate_name,
+        "gate_notes": gate["notes"] if gate else "",
+        "congestion": congestion,
+        "reason": "least congested accessible gate right now (simulated live data)",
+    }
+
+
+def _arrival_step(congestion: str, *, has_special_need: bool) -> JSONDict:
+    """Build the 'arrive early' step (extra buffer when a special need was declared)."""
+    minutes = _ARRIVAL_MINUTES[congestion] + (15 if has_special_need else 0)
+    return {"action": "arrive_early", "minutes_before_kickoff": minutes}
+
+
+def _need_support_steps(valid_needs: list[str], accessibility: JSONDict) -> list[JSONDict]:
+    """Build one 'need_support' step per declared accessibility need."""
+    steps = []
+    for need in valid_needs:
+        tips = {
+            field: accessibility[field]
+            for field in _NEED_FIELDS[need]
+            if field != "gates"
+        }
+        steps.append({"action": "need_support", "need": need, "tips": tips})
+    return steps
+
+
 def plan_visit(
     venue_id: str,
     needs: list[str] | None = None,
@@ -248,66 +296,30 @@ def plan_visit(
     services = venue["services"]
 
     gate_name = status["quiet_entrance"]
-    gate = next(
-        (g for g in accessibility["gates"] if g["name"] == gate_name), None,
-    )
-    congestion = next(
-        (
-            entry["congestion"]
-            for entry in status["gate_congestion"]
-            if entry["gate"] == gate_name
-        ),
-        "low",
-    )
-    arrive_minutes = _ARRIVAL_MINUTES[congestion]
-    if any(need != "general" for need in valid_needs):
-        arrive_minutes += 15
+    gate, congestion = _quiet_gate_and_congestion(accessibility, status, gate_name)
+    has_special_need = any(need != "general" for need in valid_needs)
 
     steps: list[JSONDict] = [
+        _entry_step(gate_name, gate, congestion),
+        _arrival_step(congestion, has_special_need=has_special_need),
         {
-            "step": 1,
-            "action": "enter_via_gate",
-            "gate": gate_name,
-            "gate_notes": gate["notes"] if gate else "",
-            "congestion": congestion,
-            "reason": "least congested accessible gate right now (simulated live data)",
-        },
-        {
-            "step": 2,
-            "action": "arrive_early",
-            "minutes_before_kickoff": arrive_minutes,
-        },
-        {
-            "step": 3,
             "action": "services_en_route",
             "water": services["water"],
             "first_aid": services["first_aid"],
             "nursing_room": services["nursing_room"],
         },
+        *_need_support_steps(valid_needs, accessibility),
     ]
-    for need in valid_needs:
-        tips = {
-            field: accessibility[field]
-            for field in _NEED_FIELDS[need]
-            if field != "gates"
-        }
-        steps.append(
-            {
-                "step": len(steps) + 1,
-                "action": "need_support",
-                "need": need,
-                "tips": tips,
-            },
-        )
     if status["elevator_outage"] is not None:
         steps.append(
             {
-                "step": len(steps) + 1,
                 "action": "elevator_outage_warning",
                 "gate": status["elevator_outage"]["gate"],
                 "note": status["elevator_outage"]["note"],
             },
         )
+    for i, step in enumerate(steps, start=1):
+        step["step"] = i
 
     result: JSONDict = {
         "venue_id": venue["id"],

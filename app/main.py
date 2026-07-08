@@ -327,6 +327,7 @@ def chat_stream(
     venue_id = body.profile.venue_id
 
     def _frames() -> Iterator[str]:
+        """Render each assistant event as one NDJSON line."""
         try:
             for kind, payload in events:
                 if kind == "meta":

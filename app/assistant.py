@@ -282,37 +282,45 @@ def _execute_call(call: types.FunctionCall) -> types.Part:
     return types.Part.from_function_response(name=name, response={"result": result})
 
 
+def _run_tool_iteration(
+    client: "genai.Client", contents: list[types.Content], calls_made: list[str],
+) -> tuple[types.GenerateContentResponse, bool]:
+    """Run one model turn; return the response and whether the loop should continue.
+
+    On a function-call turn, appends the model's Content VERBATIM (thought
+    signatures must survive on 3.x) and all function responses in ONE user
+    Content (required for parallel function calling) — same shape ``answer()``
+    always used.
+    """
+    response = client.models.generate_content(model=MODEL, contents=contents, config=_CONFIG)
+    calls = response.function_calls or []
+    if not calls:
+        return response, False
+    candidates = response.candidates or []
+    model_content = candidates[0].content if candidates else None
+    if model_content is None:  # contract violation: bail out with text-so-far
+        return response, False
+    contents.append(model_content)
+    calls_made.extend(_call_name(call) for call in calls)
+    contents.append(
+        types.Content(role="user", parts=[_execute_call(call) for call in calls]),
+    )
+    return response, True
+
+
 def _live_answer(
     message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> AssistantReply:
-    """Run the manual function-calling loop against the live Gemini API.
-
-    Copies the Phase 0.1 loop shape: append the model's function-call Content
-    VERBATIM (thought signatures must survive on 3.x), and return ALL function
-    responses in ONE user Content (required for parallel function calling).
-    """
+    """Run the manual function-calling loop against the live Gemini API."""
     client = _get_client()  # shared, reused across requests
     contents = _build_contents(message, profile, history)
     calls_made: list[str] = []
 
     response = None
     for _ in range(_MAX_TOOL_ITERATIONS):
-        response = client.models.generate_content(
-            model=MODEL, contents=contents, config=_CONFIG,
-        )
-        calls = response.function_calls or []
-        if not calls:
+        response, should_continue = _run_tool_iteration(client, contents, calls_made)
+        if not should_continue:
             break
-        candidates = response.candidates or []
-        model_content = candidates[0].content if candidates else None
-        if model_content is None:  # contract violation: bail out with text-so-far
-            break
-        # Append the model turn verbatim — do not strip/rebuild it.
-        contents.append(model_content)
-        calls_made.extend(_call_name(call) for call in calls)
-        response_parts = [_execute_call(call) for call in calls]
-        # All function responses go in ONE user Content.
-        contents.append(types.Content(role="user", parts=response_parts))
 
     final_text = response.text if response is not None else None
     if not final_text:  # None on blocked / SAFETY / function-call-only turn
@@ -372,6 +380,40 @@ def answer(
 # =====================================================================
 
 
+def _chunk_parts(chunk: types.GenerateContentResponse) -> list[types.Part]:
+    """Return a streamed chunk's parts, or an empty list when the chunk carries none."""
+    candidates = chunk.candidates or []
+    if not candidates or not candidates[0].content or not candidates[0].content.parts:
+        return []
+    parts: list[types.Part] = candidates[0].content.parts
+    return parts
+
+
+def _chunk_text(parts: Sequence[types.Part]) -> str:
+    """Join the visible (non-``thought``) text of a chunk's parts."""
+    return "".join(p.text for p in parts if p.text and not getattr(p, "thought", False))
+
+
+def _chunk_calls(parts: Sequence[types.Part]) -> list[types.FunctionCall]:
+    """Return the function calls carried by a chunk's parts."""
+    return [p.function_call for p in parts if p.function_call]
+
+
+def _consume_stream_turn(
+    stream: Iterator[types.GenerateContentResponse],
+    model_parts: list[types.Part],
+    calls: list[types.FunctionCall],
+) -> Iterator[tuple[str, str]]:
+    """Read one streamed model turn, yielding deltas and filling ``model_parts``/``calls``."""
+    for chunk in stream:
+        parts = _chunk_parts(chunk)
+        model_parts.extend(parts)
+        text = _chunk_text(parts)
+        if text:
+            yield ("delta", text)
+        calls.extend(_chunk_calls(parts))
+
+
 def _live_stream_events(
     message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> Iterator[tuple[str, str]]:
@@ -394,29 +436,10 @@ def _live_stream_events(
             model=MODEL, contents=contents, config=_CONFIG,
         )
         model_parts: list[types.Part] = []
-        calls: list[Any] = []
-        for chunk in stream:
-            candidates = chunk.candidates or []
-            parts = (
-                candidates[0].content.parts
-                if candidates and candidates[0].content and candidates[0].content.parts
-                else []
-            )
-            model_parts.extend(parts)
-            text_pieces: list[str] = []
-            for p in parts:
-                if getattr(p, "thought", False):
-                    continue
-                piece = p.text
-                if piece:
-                    text_pieces.append(piece)
-            text = "".join(text_pieces)
-            if text:
-                produced_text = True
-                yield ("delta", text)
-            calls.extend(
-                p.function_call for p in parts if getattr(p, "function_call", None)
-            )
+        calls: list[types.FunctionCall] = []
+        for event in _consume_stream_turn(stream, model_parts, calls):
+            produced_text = True
+            yield event
         if not calls:
             break
         # Tool turn: append the model content verbatim (rebuilt from the streamed
