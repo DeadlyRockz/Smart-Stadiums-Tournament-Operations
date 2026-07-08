@@ -146,7 +146,7 @@ def test_get_live_status_invalid_hour_falls_back_to_current_hour():
 
 def test_get_live_status_elevator_outage_keyed_to_gate_name():
     # Deterministic seed known to produce an outage.
-    status = get_live_status("mexico-city", hour=0)
+    status = get_live_status("mexico-city", hour=1)
     outage = status["elevator_outage"]
     assert outage is not None
     gate_names = {
@@ -171,9 +171,9 @@ def test_get_live_status_without_accessible_gates_degrades_cleanly(monkeypatch):
         },
     }
     monkeypatch.setattr(tools.data, "get_venue", lambda venue_id: fake_venue)
-    # Hour 0 makes this venue id's seed roll an elevator outage (see the seed
+    # Hour 5 makes this venue id's seed roll an elevator outage (see the seed
     # scheme in get_live_status), exercising the empty-accessible-names guard.
-    status = tools.get_live_status("no-access-venue", hour=0)
+    status = tools.get_live_status("no-access-venue", hour=5)
     assert status["elevator_outage"] is None
     assert status["quiet_entrance"] is None
 
@@ -181,10 +181,14 @@ def test_get_live_status_without_accessible_gates_degrades_cleanly(monkeypatch):
 # ---------------------------------------------------------------- plan_visit
 
 def test_plan_visit_structured_steps():
-    plan = plan_visit(VALID, ["mobility", "sensory"], hour=13)
+    # Hour 14 is a pinned seed with no elevator outage for VALID, so this also
+    # covers the "no outage warning step" path (see the outage test below for
+    # the complementary "with outage" path).
+    plan = plan_visit(VALID, ["mobility", "sensory"], hour=14)
     actions = [step["action"] for step in plan["steps"]]
     assert actions[:3] == ["enter_via_gate", "arrive_early", "services_en_route"]
     assert actions.count("need_support") == 2
+    assert "elevator_outage_warning" not in actions
     assert plan["needs"] == ["mobility", "sensory"]
     assert plan["simulated"] is True
 
@@ -205,7 +209,7 @@ def test_plan_visit_structured_steps():
 
 def test_plan_visit_includes_elevator_outage_warning_step():
     # Deterministic seed known to produce an outage (see the live-status test).
-    plan = plan_visit("mexico-city", ["mobility"], hour=0)
+    plan = plan_visit("mexico-city", ["mobility"], hour=1)
     actions = [step["action"] for step in plan["steps"]]
     assert "elevator_outage_warning" in actions
     warning = plan["steps"][actions.index("elevator_outage_warning")]

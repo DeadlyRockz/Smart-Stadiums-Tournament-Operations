@@ -188,20 +188,10 @@ def api_key_configured() -> bool:
     return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
 
 
-class _ClientCache:
-    """Process-wide cached client, built lazily on the first live request.
-
-    Reused across requests so we don't reconstruct the SDK client — and its
-    underlying connection pool / TLS session to the Gemini endpoint — on every
-    turn. A holder object (rather than a rebound module global) avoids the
-    ``global`` statement anti-pattern while keeping the same lazy-singleton
-    behaviour.
-    """
-
-    client: "genai.Client | None" = None
-
-
-_cache = _ClientCache()
+#: Process-wide cached client, built lazily on the first live request. Reused
+#: across requests so we don't reconstruct the SDK client — and its underlying
+#: connection pool / TLS session to the Gemini endpoint — on every turn.
+_client: "genai.Client | None" = None
 
 
 def _get_client() -> "genai.Client":
@@ -210,9 +200,10 @@ def _get_client() -> "genai.Client":
     Only ever called from the live path (guarded by ``api_key_configured``), so
     the key is present when the client auto-reads it at construction.
     """
-    if _cache.client is None:
-        _cache.client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
-    return _cache.client
+    global _client  # noqa: PLW0603 — simplest correct form of a lazy module-level singleton
+    if _client is None:
+        _client = genai.Client()  # auto-reads GEMINI_API_KEY / GOOGLE_API_KEY
+    return _client
 
 
 def _reset_client() -> None:
@@ -221,7 +212,8 @@ def _reset_client() -> None:
     Tests call this between cases because each one monkeypatches
     ``genai.Client`` with a fresh scripted fake.
     """
-    _cache.client = None
+    global _client  # noqa: PLW0603 — see _get_client
+    _client = None
 
 
 def _decline_language(profile: Mapping[str, Any]) -> str:

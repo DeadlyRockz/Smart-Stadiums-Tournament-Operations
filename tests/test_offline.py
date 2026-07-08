@@ -182,10 +182,10 @@ def test_navigation_answer_warns_about_elevator_outage(monkeypatch):
     from app import tools
 
     real = tools.get_live_status
-    # Pin the simulated feed to a seed known to produce an outage (hour 0).
+    # Pin the simulated feed to a seed known to produce an outage (hour 1).
     monkeypatch.setattr(
         "app.offline.tools.get_live_status",
-        lambda venue_id, hour=None: real(venue_id, hour=0),
+        lambda venue_id, hour=None: real(venue_id, hour=1),
     )
     answer = offline_answer(
         "Which gate should I use?", profile("en", "mexico-city"),

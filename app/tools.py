@@ -49,6 +49,26 @@ _ELEVATOR_OUTAGE_PROBABILITY = 0.15
 #: Suggested arrival lead time (minutes before kickoff) by gate congestion.
 _ARRIVAL_MINUTES = {"low": 60, "moderate": 75, "high": 90}
 
+#: Congestion-level weights (low, moderate, high), indexed directly by UTC
+#: hour (0-23). Models a matchday arrival curve rather than a flat
+#: distribution: quiet overnight, building through the morning, peaking in the
+#: pre-kickoff/kickoff window, and winding down late evening. ``hour`` is a
+#: stand-in for "time relative to a typical matchday", not a specific venue's
+#: local kickoff time.
+_OVERNIGHT = (75, 20, 5)   # hours 0-5: near-empty concourses
+_MORNING = (45, 40, 15)    # hours 6-10: gates opening, light arrivals
+_MIDDAY = (20, 45, 35)     # hours 11-14: build-up toward kickoff
+_PEAK = (10, 30, 60)       # hours 15-20: pre-kickoff / kickoff window
+_WIND_DOWN = (35, 40, 25)  # hours 21-23: post-match egress
+
+_HOUR_CONGESTION_WEIGHTS: tuple[tuple[int, int, int], ...] = (
+    _OVERNIGHT, _OVERNIGHT, _OVERNIGHT, _OVERNIGHT, _OVERNIGHT, _OVERNIGHT,
+    _MORNING, _MORNING, _MORNING, _MORNING, _MORNING,
+    _MIDDAY, _MIDDAY, _MIDDAY, _MIDDAY,
+    _PEAK, _PEAK, _PEAK, _PEAK, _PEAK, _PEAK,
+    _WIND_DOWN, _WIND_DOWN, _WIND_DOWN,
+)
+
 
 def _venue_error(venue_id: object) -> JSONDict:
     """Friendly error payload for an unknown venue id."""
@@ -179,9 +199,11 @@ def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
     """Return the SIMULATED live operations feed for a venue.
 
     Deterministic pseudo-random output seeded by venue id + hour: per-gate
-    congestion (low/moderate/high), a possible elevator outage keyed to an
-    accessible gate name, and a quiet-entrance suggestion. ``hour`` defaults
-    to the current UTC hour; pass a fixed value to pin the seed (tests).
+    congestion (low/moderate/high, weighted by ``_HOUR_CONGESTION_WEIGHTS`` so
+    a matchday-peak hour is genuinely more likely to read "high" than 3am), a
+    possible elevator outage keyed to an accessible gate name, and a
+    quiet-entrance suggestion. ``hour`` defaults to the current UTC hour; pass
+    a fixed value to pin the seed (tests).
     """
     venue = data.get_venue(venue_id)
     if venue is None:
@@ -194,12 +216,13 @@ def get_live_status(venue_id: str, hour: int | None = None) -> JSONDict:
         except (TypeError, ValueError):
             hour = datetime.now(UTC).hour
     rng = random.Random(f"{venue_id}-{hour}")  # noqa: S311 — deterministic simulation, not security
+    weights = _HOUR_CONGESTION_WEIGHTS[hour]
     gates = venue["accessibility"]["gates"]
     gate_congestion = [
         {
             "gate": gate["name"],
             "accessible": gate["accessible"],
-            "congestion": rng.choice(CONGESTION_LEVELS),
+            "congestion": rng.choices(CONGESTION_LEVELS, weights=weights, k=1)[0],
         }
         for gate in gates
     ]
