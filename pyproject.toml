@@ -66,6 +66,12 @@ allowed-confusables = ["ا", "أ", "إ", "آ", "ئ", "ي", "و", "ه"]
 # idiomatic way to scope a monkeypatch target to a single test.
 "tests/*" = ["N801", "PLC0415"]
 
+[tool.mypy]
+# Type-check with `python -m mypy app` (see requirements-dev.txt).
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
 [tool.coverage.run]
 source = ["app"]
 branch = true

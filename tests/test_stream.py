@@ -8,8 +8,10 @@ blocked-response decline, offline fallback, and the NDJSON endpoint contract.
 import json
 
 import pytest
+from google.genai import types
 
 from app import assistant
+from tests.conftest import FakeChunk
 
 VENUE = "new-york-new-jersey"
 
@@ -73,6 +75,24 @@ def test_live_tool_round_then_streamed_answer(
     assert second[1].role == "model"  # verbatim tool-call turn preserved
     assert second[2].role == "user"
     assert len(second[2].parts) == 1  # one function response for the one call
+
+
+def test_streamed_thought_parts_are_excluded_from_visible_text(
+    monkeypatch, patch_gemini_stream,
+):
+    _with_key(monkeypatch)
+    chunk = FakeChunk(
+        parts=[
+            types.Part(text="internal reasoning", thought=True),
+            types.Part(text="Gate A is quietest."),
+        ],
+    )
+    patch_gemini_stream([[chunk]])
+
+    events = list(assistant.answer_stream("quietest gate?", {"language": "en"}))
+
+    deltas = "".join(payload for kind, payload in events if kind == "delta")
+    assert deltas == "Gate A is quietest."  # thought text never reaches the client
 
 
 def test_live_blocked_no_text_yields_decline(monkeypatch, patch_gemini_stream, empty_chunk):

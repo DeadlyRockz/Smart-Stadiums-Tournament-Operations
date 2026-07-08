@@ -546,7 +546,9 @@ def _navigation_answer(venue_id: str, lang: str) -> str:
     status = tools.get_live_status(venue_id)
     info = tools.get_venue_info(venue_id)
     gate_name = status["quiet_entrance"]
-    gate = next((g for g in info["gates"] if g["name"] == gate_name), {})
+    gate: dict[str, Any] = next(
+        (g for g in info["gates"] if g["name"] == gate_name), {},
+    )
     level = next(
         (
             entry["congestion"]

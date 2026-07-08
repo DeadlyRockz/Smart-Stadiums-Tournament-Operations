@@ -18,12 +18,14 @@ Venue = dict[str, Any]
 def load_venues() -> dict[str, Any]:
     """Load and cache the full dataset (tournament metadata + venues)."""
     with _DATA_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
+        dataset: dict[str, Any] = json.load(f)
+        return dataset
 
 
 def list_venues() -> list[Venue]:
     """Return all venue records."""
-    return load_venues()["venues"]
+    venues: list[Venue] = load_venues()["venues"]
+    return venues
 
 
 def get_venue(venue_id: str) -> Venue | None:

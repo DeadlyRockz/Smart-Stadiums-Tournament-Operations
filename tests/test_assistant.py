@@ -116,6 +116,24 @@ def test_blocked_none_text_returns_polite_decline(monkeypatch):
     assert reply.text == assistant._DECLINE["es"]  # localized decline
 
 
+def test_function_call_without_model_content_breaks_loop_gracefully(monkeypatch):
+    _with_key(monkeypatch)
+    # Defensive branch: function_calls is truthy but the SDK reports no candidate
+    # content (contract violation) — the loop must bail out rather than crash.
+    client = _FakeClient(
+        [_FakeResponse(function_calls=[_FakeCall("get_venue_info", {"venue_id": VENUE})])],
+    )
+    _patch_client(monkeypatch, client)
+
+    reply = assistant.answer(
+        "tell me about MetLife", profile={"venue_id": VENUE, "language": "en"},
+    )
+
+    assert reply.mode == "live"
+    assert reply.text == assistant._DECLINE["en"]  # no content to continue, no final text
+    assert reply.tool_calls_made == []  # loop bailed before recording the call
+
+
 def test_decline_in_unsupported_language_falls_back_to_english(monkeypatch):
     _with_key(monkeypatch)
     client = _FakeClient([_FakeResponse(text=None)])  # blocked / SAFETY

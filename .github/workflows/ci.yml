@@ -23,6 +23,9 @@ jobs:
       - name: Lint (ruff)
         run: python -m ruff check app tests
 
+      - name: Type check (mypy --strict)
+        run: python -m mypy app
+
       - name: Tests with coverage (fails under 100%)
         run: |
           python -m coverage run -m pytest

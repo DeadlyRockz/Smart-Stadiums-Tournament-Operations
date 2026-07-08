@@ -245,9 +245,8 @@ def healthz() -> Health:
     return Health(status="ok", llm="live" if assistant.api_key_configured() else "offline")
 
 
-@app.get("/api/venues")
-def list_venues() -> VenueList:
-    """All tournament venues (public summary fields only)."""
+def _venue_list(venues: list[data.Venue]) -> VenueList:
+    """Project full venue records down to the public summary fields."""
     return VenueList(
         venues=[
             VenueSummary(
@@ -257,9 +256,15 @@ def list_venues() -> VenueList:
                 country=v["country"],
                 capacity=v["capacity"],
             )
-            for v in data.list_venues()
+            for v in venues
         ],
     )
+
+
+@app.get("/api/venues")
+def list_venues() -> VenueList:
+    """All tournament venues (public summary fields only)."""
+    return _venue_list(data.list_venues())
 
 
 # Declared before /api/venues/{venue_id} so "search" is not read as a venue id.
@@ -272,22 +277,11 @@ def search_venues(
     Case-insensitive substring match; an empty result is a 200 with an empty
     list, not an error. The query length is capped by validation (422 beyond).
     """
-    return VenueList(
-        venues=[
-            VenueSummary(
-                id=v["id"],
-                name=v["name"],
-                city=v["city"],
-                country=v["country"],
-                capacity=v["capacity"],
-            )
-            for v in data.search_venues(q)
-        ],
-    )
+    return _venue_list(data.search_venues(q))
 
 
 @app.get("/api/venues/{venue_id}")
-def get_venue(venue_id: str) -> dict:
+def get_venue(venue_id: str) -> data.Venue:
     """Full record for one venue; 404 when the id is unknown."""
     venue = data.get_venue(venue_id)
     if venue is None:

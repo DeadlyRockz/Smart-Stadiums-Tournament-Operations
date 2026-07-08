@@ -16,7 +16,7 @@ the whole app with no credentials.
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from google import genai
 from google.genai import errors, types
@@ -179,7 +179,7 @@ class AssistantReply:
     """Result of :func:`answer`."""
 
     text: str
-    mode: str  # "live" | "offline"
+    mode: Literal["live", "offline"]
     tool_calls_made: list[str] = field(default_factory=list)
 
 
@@ -270,6 +270,18 @@ def _build_contents(
     return contents
 
 
+def _call_name(call: types.FunctionCall) -> str:
+    """Resolve a function call's name (the SDK types it optional; Gemini always sends one)."""
+    return call.name or ""
+
+
+def _execute_call(call: types.FunctionCall) -> types.Part:
+    """Run one tool call and wrap its JSON result as a function-response Part."""
+    name = _call_name(call)
+    result = tools.execute_tool(name, dict(call.args or {}))
+    return types.Part.from_function_response(name=name, response={"result": result})
+
+
 def _live_answer(
     message: str, profile: Mapping[str, Any], history: Sequence[Mapping[str, Any]],
 ) -> AssistantReply:
@@ -291,17 +303,14 @@ def _live_answer(
         calls = response.function_calls or []
         if not calls:
             break
+        candidates = response.candidates or []
+        model_content = candidates[0].content if candidates else None
+        if model_content is None:  # contract violation: bail out with text-so-far
+            break
         # Append the model turn verbatim — do not strip/rebuild it.
-        contents.append(response.candidates[0].content)
-        response_parts = []
-        for call in calls:
-            calls_made.append(call.name)
-            response_parts.append(
-                types.Part.from_function_response(
-                    name=call.name,
-                    response={"result": tools.execute_tool(call.name, dict(call.args or {}))},
-                ),
-            )
+        contents.append(model_content)
+        calls_made.extend(_call_name(call) for call in calls)
+        response_parts = [_execute_call(call) for call in calls]
         # All function responses go in ONE user Content.
         contents.append(types.Content(role="user", parts=response_parts))
 
@@ -394,11 +403,14 @@ def _live_stream_events(
                 else []
             )
             model_parts.extend(parts)
-            text = "".join(
-                p.text
-                for p in parts
-                if getattr(p, "text", None) and not getattr(p, "thought", False)
-            )
+            text_pieces: list[str] = []
+            for p in parts:
+                if getattr(p, "thought", False):
+                    continue
+                piece = p.text
+                if piece:
+                    text_pieces.append(piece)
+            text = "".join(text_pieces)
             if text:
                 produced_text = True
                 yield ("delta", text)
@@ -410,13 +422,7 @@ def _live_stream_events(
         # Tool turn: append the model content verbatim (rebuilt from the streamed
         # parts), run the tools, and return all responses in ONE user Content.
         contents.append(types.Content(role="model", parts=model_parts))
-        response_parts = [
-            types.Part.from_function_response(
-                name=call.name,
-                response={"result": tools.execute_tool(call.name, dict(call.args or {}))},
-            )
-            for call in calls
-        ]
+        response_parts = [_execute_call(call) for call in calls]
         contents.append(types.Content(role="user", parts=response_parts))
 
     if not produced_text:

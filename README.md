@@ -157,11 +157,12 @@ mode instead of failing.
 ## 5. Testing & code quality
 
 ```bash
-python -m pytest            # 144 tests, no network required
+python -m pytest            # 152 tests, no network required
 
-# Optional dev tooling (requirements-dev.txt): lint + coverage gate
+# Optional dev tooling (requirements-dev.txt): lint + type check + coverage gate
 pip install -r requirements-dev.txt
 python -m ruff check app tests            # lint: zero findings
+python -m mypy app                        # --strict type check: zero findings
 python -m coverage run -m pytest && python -m coverage report  # 100% of app/
 ```
 
@@ -180,8 +181,9 @@ concurrent load, Redis wiring and startup selection), and full-stack
 integration in both modes. Verified green from a clean virtual environment
 installed only from `requirements.txt`.
 
-**Tooling:** `ruff` (rules in `pyproject.toml`) passes with zero findings, and a
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs lint + tests on every
+**Tooling:** `ruff` (rules in `pyproject.toml`, including the full `--select ALL`
+ruleset) and `mypy --strict` both pass with zero findings, and a GitHub Actions
+workflow (`.github/workflows/ci.yml`) runs lint + type check + tests on every
 push, failing if coverage drops below 100%.
 
 ---
@@ -236,10 +238,10 @@ push, failing if coverage drops below 100%.
 
 | Criterion | Where it is addressed |
 |---|---|
-| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions; typed; docstrings; `ruff` lint passes clean (config in `pyproject.toml`); CI enforces lint + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
+| **Code Quality** | Small, single-responsibility modules (`data` → `tools` → `assistant`/`offline` → `main`); pure functions, no duplicated logic (shared helpers for venue-summary projection and Gemini tool-call execution); fully typed and `mypy --strict` clean; docstrings; `ruff` lint passes clean including the full `--select ALL` ruleset (config in `pyproject.toml`); CI enforces lint + type check + tests on every push; MIT `LICENSE`; the delicate Gemini SDK calls copied from a verified reference, not guessed. |
 | **Security** | Section 6 — no secrets, strict CSP + headers, XSS-safe rendering, input caps, rate limiting, prompt-injection hygiene, key never leaked. |
 | **Efficiency** | Dataset loaded once and cached (`lru_cache`); stateless requests; frozen system prompt for a stable cache prefix; tools return compact dicts; offline mode avoids any network call. |
-| **Testing** | Section 5 — 150 tests, **100% line *and* branch coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |
+| **Testing** | Section 5 — 152 tests, **100% line *and* branch coverage of `app/`** (enforced in CI), network fully mocked, green from a clean venv. |
 | **Accessibility** | Section 7 — WCAG-minded, screen-reader-first UI, plus accessibility *is* the product domain. |
 | **Problem Statement Alignment** | A smart, dynamic stadium assistant that makes **context-driven decisions** (profile + live feed → tailored routes/answers) for a chosen FIFA WC 2026 vertical — exactly the challenge's stated expectations. |
 
